@@ -5,8 +5,19 @@ import librosa
 import matplotlib.pyplot as plt
 from IPython.display import Audio
 from omegaconf import OmegaConf
-from nemo.collections.asr.models import ClusteringDiarizer
-from nemo.collections.asr.parts.utils.speaker_utils import rttm_to_labels
+
+# Try to import NVIDIA NeMo collections; provide clear instructions if missing
+try:
+    from nemo.collections.asr.models import ClusteringDiarizer
+    from nemo.collections.asr.parts.utils.speaker_utils import rttm_to_labels
+except ModuleNotFoundError:
+    print("\nModule 'nemo' is not installed in the active environment.")
+    print("Install a compatible PyTorch first (CPU example):")
+    print("  pip install torch --index-url https://download.pytorch.org/whl/cpu")
+    print("Then install NeMo (example, may require NVIDIA index):")
+    print("  pip install nemo_toolkit[all] --extra-index-url https://pypi.ngc.nvidia.com")
+    print("After installing, re-run this script.")
+    raise
 
 CONFIG = OmegaConf.create({
     'batch_size': 32,  # Top-level for embedding extraction batching
