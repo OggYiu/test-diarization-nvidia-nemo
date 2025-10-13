@@ -23,10 +23,15 @@ wheels/
 .installed.cfg
 *.egg
 
-# FastAPI
-*.log
+# Output directories
+output/
+temp/
+results/
+*.rttm
+*.wav
+*.mp3
 
-# IDEs
+# IDE
 .vscode/
 .idea/
 *.swp
@@ -37,12 +42,11 @@ wheels/
 .DS_Store
 Thumbs.db
 
-# Temporary files
-temp/
-tmp/
-*.tmp
+# Models (downloaded by NeMo/FunASR)
+models/
+cache/
+.cache/
 
-# Model cache (NeMo downloads models here)
-.nemo/
-nemo_experiments/
+# Logs
+*.log
 

@@ -280,7 +280,7 @@ if __name__ == "__main__":
     RTTM_FOLDER = "demo/output/pred_rttms"
     WAV_FOLDER = "demo/phone_recordings"  # Current directory (adjust if needed)
     OUTPUT_FOLDER = "demo/output/chopped_audios"
-    PADDING_MS = 100  # 100ms padding before/after each segment
+    PADDING_MS = 0  # 100ms padding before/after each segment
     
     # Example 1: Process a specific file (uncomment to use)
     # chop_all_audio_files(
@@ -301,4 +301,3 @@ if __name__ == "__main__":
         filename=filename,  # None means process all files
         padding_ms=PADDING_MS
     )
-

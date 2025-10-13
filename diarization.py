@@ -34,7 +34,7 @@ def diarize_audio(audio_filepath, out_dir, num_speakers=2):
         num_speakers (int, optional): Number of speakers if known (default: None for automatic detection)
     
     Returns:
-        str: Path to the output directory containing diarization results
+        str: Content of the .rttm file containing diarization results
     """
     # Delete output directory if it exists
     if os.path.exists(out_dir):
@@ -127,8 +127,23 @@ def diarize_audio(audio_filepath, out_dir, num_speakers=2):
         diarizer = ClusteringDiarizer(cfg=CONFIG)
         diarizer.diarize()
         
+        # Find and read the .rttm file
+        rttm_dir = os.path.join(out_dir, 'pred_rttms')
+        if not os.path.exists(rttm_dir):
+            raise FileNotFoundError(f"RTTM directory not found: {rttm_dir}")
+        
+        rttm_files = [f for f in os.listdir(rttm_dir) if f.endswith('.rttm')]
+        if not rttm_files:
+            raise FileNotFoundError(f"No .rttm file found in: {rttm_dir}")
+        
+        # Read the first .rttm file found
+        rttm_filepath = os.path.join(rttm_dir, rttm_files[0])
+        with open(rttm_filepath, 'r') as f:
+            rttm_content = f.read()
+        
         print(f"\nDiarization complete! Results saved to: {out_dir}")
-        return out_dir
+        print(f"RTTM file: {rttm_filepath}")
+        return rttm_content
         
     finally:
         # Clean up temporary manifest file
@@ -147,7 +162,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     if os.path.exists(args.audio_file):
-        diarize_audio(args.audio_file, out_dir=args.out_dir)
+        rttm_content = diarize_audio(args.audio_file, out_dir=args.out_dir)
+        print("\n=== RTTM Content ===")
+        print(rttm_content)
     else:
         print(f"Audio file not found: {args.audio_file}")
         print("Please provide a valid audio file path.")

@@ -1,2 +1,0 @@
-# FastAPI Diarization API
-
