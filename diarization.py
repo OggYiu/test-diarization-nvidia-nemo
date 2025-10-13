@@ -24,7 +24,7 @@ except ModuleNotFoundError:
     raise
 
 
-def diarize_audio(audio_filepath, out_dir='diarization_output', num_speakers=2):
+def diarize_audio(audio_filepath, out_dir, num_speakers=2):
     """
     Perform speaker diarization on an audio file.
     
@@ -143,13 +143,11 @@ if __name__ == "__main__":
                         help='Path to the audio file to diarize (default: ./demo/phone_recordings/test.wav)')
     parser.add_argument('--out_dir', type=str, default='./temp/diarization_output',
                         help='Output directory for diarization results (default: ./temp/diarization_output)')
-    parser.add_argument('--num_speakers', type=int, default=2,
-                        help='Number of speakers if known (default: 2)')
     
     args = parser.parse_args()
     
     if os.path.exists(args.audio_file):
-        diarize_audio(args.audio_file, out_dir=args.out_dir, num_speakers=args.num_speakers)
+        diarize_audio(args.audio_file, out_dir=args.out_dir)
     else:
         print(f"Audio file not found: {args.audio_file}")
         print("Please provide a valid audio file path.")
