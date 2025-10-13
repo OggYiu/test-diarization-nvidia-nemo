@@ -1,16 +1,11 @@
 import os
 import json
 import tempfile
-import argparse
 import shutil
-import wget  # For downloading sample audio if needed
-import numpy as np
-import librosa
-import matplotlib.pyplot as plt
-from IPython.display import Audio
+from pathlib import Path
 from omegaconf import OmegaConf
 
-# Try to import NVIDIA NeMo collections; provide clear instructions if missing
+# Try to import NVIDIA NeMo collections
 try:
     from nemo.collections.asr.models import ClusteringDiarizer
     from nemo.collections.asr.parts.utils.speaker_utils import rttm_to_labels
@@ -31,7 +26,7 @@ def diarize_audio(audio_filepath, out_dir='diarization_output', num_speakers=2):
     Args:
         audio_filepath (str): Path to the audio file to diarize
         out_dir (str): Output directory for diarization results (default: 'diarization_output')
-        num_speakers (int, optional): Number of speakers if known (default: None for automatic detection)
+        num_speakers (int, optional): Number of speakers if known (default: 2)
     
     Returns:
         str: Path to the output directory containing diarization results
@@ -136,20 +131,39 @@ def diarize_audio(audio_filepath, out_dir='diarization_output', num_speakers=2):
             os.unlink(manifest_filepath)
 
 
-# Example usage (can be commented out or removed when used as a module)
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Perform speaker diarization on an audio file.')
-    parser.add_argument('audio_file', type=str, nargs='?', default='./demo/phone_recordings/test.wav',
-                        help='Path to the audio file to diarize (default: ./demo/phone_recordings/test.wav)')
-    parser.add_argument('--out_dir', type=str, default='./temp/diarization_output',
-                        help='Output directory for diarization results (default: ./temp/diarization_output)')
-    parser.add_argument('--num_speakers', type=int, default=2,
-                        help='Number of speakers if known (default: 2)')
+def get_rttm_content(output_dir):
+    """
+    Extract the content of the RTTM file from the diarization output directory.
     
-    args = parser.parse_args()
+    Args:
+        output_dir (str): Path to the diarization output directory
     
-    if os.path.exists(args.audio_file):
-        diarize_audio(args.audio_file, out_dir=args.out_dir, num_speakers=args.num_speakers)
-    else:
-        print(f"Audio file not found: {args.audio_file}")
-        print("Please provide a valid audio file path.")
+    Returns:
+        str: Content of the RTTM file, or None if not found
+    """
+    # Look for RTTM file in pred_rttms subdirectory
+    rttm_dir = os.path.join(output_dir, "pred_rttms")
+    
+    if not os.path.exists(rttm_dir):
+        print(f"RTTM directory not found: {rttm_dir}")
+        return None
+    
+    # Find the first .rttm file
+    rttm_files = [f for f in os.listdir(rttm_dir) if f.endswith('.rttm')]
+    
+    if not rttm_files:
+        print(f"No RTTM files found in {rttm_dir}")
+        return None
+    
+    # Read the first RTTM file
+    rttm_path = os.path.join(rttm_dir, rttm_files[0])
+    
+    try:
+        with open(rttm_path, 'r') as f:
+            content = f.read()
+        print(f"Successfully read RTTM file: {rttm_path}")
+        return content
+    except Exception as e:
+        print(f"Error reading RTTM file {rttm_path}: {e}")
+        return None
+

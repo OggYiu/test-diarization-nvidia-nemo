@@ -1,62 +1,6 @@
-segment_001: 我有这时情嘛。
-segment_002: 啊刘生啊今入得去，你今日，我想入嗰只确药。😊
-segment_003: 边解高噶。
-segment_004: 嗰只诶九六九八啊。
-segment_005: 高九八。
-segment_006: 啊。
-segment_007: 哦，呢日唔系国有，呢日万国故计。
-segment_008: 哎呀哎呀交。
-segment_009: 꺼네.
-segment_010: 맞.
-segment_011: 嗰国药就应该一零九三啦。
-segment_012: 啊系系系系唔该。😊
-segment_013: 咁，你系想买万国定系咩啊万国数据哦， o k ,咁，就诶。
-segment_014: 谢谢。
-segment_015: 而家而家三十九个九定三十九个九。
-segment_016: 哦咁啊入。
-segment_017: 你就。
-segment_018: 有冇签过得唔得啊，呢只 o k 嘛。
-segment_019: 应该都 ok嘅。
-segment_020: 哦，咁，你同，我有咩千古啊。
-segment_021: 你之前有冇买过嘅。
-segment_022: 以前有有都有赚过佢系系有赚过佢钱噶，系。😊
-segment_023: 啊想买一千股啊。
-segment_024: 系啊，要几落几多啊四十啊。
-segment_025: 而家唔知噶三十九号嗰定三十九九号半三十九。
-segment_026: 查包。
-segment_027: 对卅十九个九咪三十九九个半咯。
-segment_028: 好啊好啊，好啊。
-segment_029: 嗱好好，咁我一百股一首嘅话。
-segment_030: 系系，我一次。
-segment_031: 一千一千就三万九千几吓，系大概四万到咁啊竞价先先。
-segment_032: 乜人得嘅。
-segment_033: 唔得긴가。
-segment_034: No see.
-segment_035: Yeah.
-segment_036: 
-segment_037: 冇错九六九八。😔
-segment_038: 三十九个九和半买一千。
-segment_039: 亲。
-segment_040: Yeah.
-segment_041: 经教可应该答过去关毋关。😔
-segment_042: 对.
-segment_043: 九六九八。
-segment_044: 搞没有。
-segment_045: 시어.
-segment_046: たし。
-segment_047: 
-segment_048: 
-segment_049: 哦哦唔得一日三十九号嗰一日四十蚊，系唔好意思。
-segment_050: 哦这样慢呢。
-segment_051: 佢个教篱冇冇斗拧嘅，诶即系哦哦。
-segment_052: 哦，对呀慢的。
-segment_053: はは。
-segment_054: 对 맞。
-segment_055: 
-segment_056: 딱。
-segment_057: 唔好意思啊，因为佢啲价钱，因为而家。得系搞掂因我又有痘拧啊啊原来斗拧啊，即系九二佢系九号九号二九号四九号六咁样嘅啊不过唔紧要啦，你落四十蚊睇下买唔买到咯，反正佢都系使最佳价。😊
-segment_058: 四啊我想唔使四啊一四啦四零九五一啦四零一啦。😊
-segment_059: 俾多一噶，因为嗱，佢上日收四十蚊零八嘅，咁，但系呢个价就唔准嘅，而家吓必时跳价你都知噶啦，咁，你想四十蚊一毫俾佢要系咪系啊。😊
-segment_060: 系呀系。
-segment_061: 冇帮你改四十蚊一号排紧队啊如果切 o k 排早啦，拜拜。😊
-segment_062: 拜e拜。
+segment_001: 那些。
+segment_002: 喂。
+segment_003: 啊江시。
+segment_004: 系呀。
+segment_005: 科福里嗰个万确数度三十九个七毫四攞咗一次。
+segment_006: 哦，好啊好啊好啊好，唔该，拜拜啊，年到三月。😊

@@ -15,6 +15,7 @@ default_ollama_url = "http://192.168.61.2:11434"
 def main(prompt_text: str | None = None, model: str = default_model, ollama_url: str = default_ollama_url):
     print(f"\nInitializing Ollama Chat LLM (model: {model})...")
     print(f"Connecting to: {ollama_url}")
+    print(f"Prompt: {prompt_text}")
     # Use the chat interface so we can provide a system message
     chat_llm = ChatOllama(
         model=model,
