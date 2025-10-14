@@ -16,7 +16,13 @@ WORK_ROOT.mkdir(parents=True, exist_ok=True)
 
 
 @app.post("/process")
-async def process_audio(file: UploadFile = File(...), num_speakers: int = Form(2), skip_llm: bool = Form(False)):
+async def process_audio(
+    file: UploadFile = File(...), 
+    num_speakers: int = Form(2), 
+    skip_llm: bool = Form(False),
+    llm_model: str = Form("deepsek-r1:32b"),
+    ollama_url: str = Form("http://192.168.61.2:11434")
+):
     # Save uploaded file to a unique working folder
     job_id = str(uuid.uuid4())
     job_dir = WORK_ROOT / job_id
@@ -32,7 +38,12 @@ async def process_audio(file: UploadFile = File(...), num_speakers: int = Form(2
 
     async def run_pipeline():
         try:
-            result = pipeline.process_audio(str(audio_path), skip_llm=skip_llm)
+            result = pipeline.process_audio(
+                str(audio_path), 
+                skip_llm=skip_llm,
+                llm_model=llm_model,
+                ollama_url=ollama_url
+            )
             jobs[job_id] = {"status": "done", "result": result}
         except Exception as e:
             jobs[job_id] = {"status": "error", "error": str(e)}

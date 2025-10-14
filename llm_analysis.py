@@ -4,7 +4,7 @@ from langchain_ollama import ChatOllama
 import argparse
 from pathlib import Path
 
-default_model = "gpt-oss:20b"
+default_model = "deepsek-r1:32b"
 # model = "gemma3:270m"
 # model = "qwen2.5:7b-instruct"
 # model = "qwen3:30b"

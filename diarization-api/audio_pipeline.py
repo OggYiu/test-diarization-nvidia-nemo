@@ -467,7 +467,7 @@ class AudioPipeline:
     
     # ========== Step 4: LLM Analysis ==========
     
-    def analyze_transcripts(self, transcriptions, model="gpt-oss:20b", 
+    def analyze_transcripts(self, transcriptions, model="deepsek-r1:32b", 
                           ollama_url="http://192.168.61.2:11434", 
                           custom_prompt=None):
         """
@@ -545,7 +545,7 @@ class AudioPipeline:
     
     def process_audio(self, audio_filepath, language="auto", 
                      padding_ms=100, stt_model='iic/SenseVoiceSmall',
-                     llm_model="gpt-oss:20b", ollama_url="http://192.168.61.2:11434",
+                     llm_model="deepsek-r1:32b", ollama_url="http://192.168.61.2:11434",
                      skip_llm=False, custom_prompt=None):
         """
         Process audio through the complete pipeline.
@@ -645,8 +645,8 @@ def main():
     # LLM
     parser.add_argument('--skip-llm', action='store_true',
                        help='Skip LLM analysis step')
-    parser.add_argument('--llm-model', type=str, default='gpt-oss:20b',
-                       help='Ollama model name (default: gpt-oss:20b)')
+    parser.add_argument('--llm-model', type=str, default='deepsek-r1:32b',
+                       help='Ollama model name (default: deepsek-r1:32b)')
     parser.add_argument('--ollama-url', type=str, default='http://192.168.61.2:11434',
                        help='Ollama server URL (default: http://192.168.61.2:11434)')
     parser.add_argument('--prompt', type=str,
