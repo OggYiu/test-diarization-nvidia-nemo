@@ -71,5 +71,3 @@ if __name__ == "__main__":
         main(prompt_text, args.model, args.url)
     except Exception as e:
         print(f"\nError: {e}")
-
-

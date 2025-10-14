@@ -1,0 +1,11 @@
+fastapi[standard]
+fastapi-cli[standard]
+uvicorn[standard]
+numpy
+pydub
+torch
+torchaudio
+nemo_toolkit[all]
+funasr
+langchain-ollama
+omegaconf
