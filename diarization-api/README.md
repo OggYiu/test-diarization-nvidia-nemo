@@ -48,7 +48,6 @@ pip install nemo_toolkit[all]
 ### Option 2: Docker
 
 ```bash
-cd diarization-api
 docker build -t diarization-api .
 docker run -p 8000:8000 diarization-api
 ```

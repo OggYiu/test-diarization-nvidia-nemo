@@ -291,7 +291,7 @@ if __name__ == "__main__":
     #     padding_ms=PADDING_MS
     # )
     
-    filename="[Dickson Lau 0489]_8330-96674941_20251002011025(19539)"
+    filename="test"
 
     # Example 2: Process all files
     chop_all_audio_files(

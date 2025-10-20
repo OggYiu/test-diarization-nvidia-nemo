@@ -298,18 +298,7 @@ def main():
     )
     
     args = parser.parse_args()
-
-    # Resolve model selection
-    model_size = args.model_size
-    if args.model_name:
-        model_name = args.model_name
-    else:
-        if model_size == 'small':
-            model_name = 'iic/SenseVoiceSmall'
-        elif model_size == 'large':
-            model_name = 'iic/SenseVoiceLarge'
-        else:
-            model_name = 'iic/SenseVoiceSmall'
+    model_name = 'iic/SenseVoiceSmall'
 
     # Initialize the SenseVoice model (global)
     global model
@@ -325,25 +314,6 @@ def main():
         print("Model loaded successfully!")
     except Exception as e:
         print(f"Failed to load model '{model_name}': {e}")
-        # Provide helpful guidance and try fallback to the small model
-        fallback = 'iic/SenseVoiceSmall'
-        if model_name != fallback:
-            print(f"Falling back to '{fallback}'. If you intended to use a different model, please verify the model id is correct and available on the model hub.")
-            try:
-                model = AutoModel(
-                    model=fallback,
-                    vad_model="iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
-                    vad_kwargs={"max_single_segment_time": 30000},
-                    trust_remote_code=False,
-                    disable_update=True,
-                )
-                print(f"Fallback model '{fallback}' loaded successfully.")
-            except Exception as e2:
-                print(f"Fallback load failed: {e2}\nCannot continue without a working model. Exiting.")
-                sys.exit(1)
-        else:
-            print("No fallback available. Exiting.")
-            sys.exit(1)
     
     # Ensure output directory exists when an output path is provided
     output_path = Path(args.output)
