@@ -10,9 +10,9 @@ import traceback
 
 # Common model options
 MODEL_OPTIONS = [
-    "qwen2.5vl:32b",
-    "gpt-oss:20b",
     "qwen3:30b",
+    # "qwen2.5vl:32b",
+    "gpt-oss:20b",
     "gemma3-27b",
 ]
 
@@ -123,7 +123,6 @@ def create_ui():
         gr.Markdown(
             """
             # 📞 LLM Phone Call Analyzer
-            使用 Ollama 和 LangChain 分析電話對話記錄
             """
         )
         
@@ -194,17 +193,6 @@ def create_ui():
                     lines=20,
                     interactive=False,
                 )
-        
-        # Examples
-        gr.Markdown("### 💡 提示")
-        gr.Markdown(
-            """
-            - 支持從文本框直接輸入或上傳 .txt/.json 文件
-            - 系統訊息可以自定義以適應不同的分析需求
-            - Temperature 越高，回應越有創意；越低，回應越確定
-            - 確保 Ollama 服務正在運行並且可以訪問
-            """
-        )
         
         # Connect the button
         analyze_btn.click(

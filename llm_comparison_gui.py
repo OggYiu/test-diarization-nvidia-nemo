@@ -290,19 +290,6 @@ def create_ui():
                                 )
                         result_boxes.append((row, model_label, time_label, result_text))
         
-        # Examples and tips
-        gr.Markdown("### 💡 使用提示")
-        gr.Markdown(
-            """
-            - **並行執行**: 所有選中的模型會同時運行，大幅節省時間
-            - **多模型選擇**: 最多可選擇 6 個模型進行比較（建議選擇 2-3 個）
-            - **結果比對**: 所有模型結果以列表方式並排顯示，可同時查看和比較
-            - **自動滾動**: 結果超過 3 個時可以滾動查看所有模型
-            - **性能指標**: 顯示每個模型的執行時間，方便評估性能
-            - **自定義模型**: 在模型列表中可以輸入自定義模型名稱
-            - 確保 Ollama 服務正在運行並且可以訪問
-            """
-        )
         
         # Helper function to update UI
         def update_ui(

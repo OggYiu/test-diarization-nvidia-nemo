@@ -6,7 +6,7 @@ import time
 from diarization import diarize_audio
 
 
-def process_audio(audio_file, num_speakers):
+def process_audio(audio_file):
     """
     Process audio file through diarization and return results.
     
@@ -26,14 +26,14 @@ def process_audio(audio_file, num_speakers):
         
         # Run diarization with timing
         status = f"🔄 Processing audio file: {os.path.basename(audio_file)}\n"
-        status += f"📊 Number of speakers: {num_speakers}\n"
+        # status += f"📊 Number of speakers: {num_speakers}\n"
         status += f"📁 Output directory: {temp_out_dir}\n\n"
         
         start_time = time.time()
         rttm_content = diarize_audio(
             audio_filepath=audio_file,
             out_dir=temp_out_dir,
-            num_speakers=num_speakers
+            num_speakers=2
         )
         end_time = time.time()
         
@@ -69,15 +69,6 @@ def create_interface():
     """Create and configure the Gradio interface."""
     
     with gr.Blocks(title="Speaker Diarization", theme=gr.themes.Soft()) as demo:
-        gr.Markdown(
-            """
-            # 🎙️ Speaker Diarization Tool
-            
-            Upload an audio file to perform speaker diarization using NVIDIA NeMo.
-            The system will identify different speakers and their speaking times.
-            """
-        )
-        
         with gr.Row():
             with gr.Column(scale=1):
                 gr.Markdown("### Input")
@@ -87,26 +78,17 @@ def create_interface():
                     sources=["upload"]
                 )
                 
-                num_speakers = gr.Slider(
-                    minimum=1,
-                    maximum=10,
-                    value=2,
-                    step=1,
-                    label="Number of Speakers",
-                    info="Expected number of speakers in the audio"
-                )
+                # num_speakers = gr.Slider(
+                #     minimum=1,
+                #     maximum=10,
+                #     value=2,
+                #     step=1,
+                #     label="Number of Speakers",
+                #     info="Expected number of speakers in the audio"
+                # )
                 
                 process_btn = gr.Button("🚀 Start Diarization", variant="primary", size="lg")
                 
-                gr.Markdown(
-                    """
-                    ### 📝 Notes:
-                    - Supported formats: WAV, MP3, FLAC, etc.
-                    - Processing may take a few minutes
-                    - Results will show speaker segments with timestamps
-                    """
-                )
-            
             with gr.Column(scale=2):
                 gr.Markdown("### Results")
                 
@@ -131,20 +113,12 @@ def create_interface():
                     visible=True
                 )
         
-        # Examples
-        gr.Markdown("### 📂 Example")
-        gr.Examples(
-            examples=[
-                ["./demo/phone_recordings/test.wav", 2],
-            ],
-            inputs=[audio_input, num_speakers],
-            label="Try with sample audio"
-        )
         
         # Connect the button to the processing function
         process_btn.click(
             fn=process_audio,
-            inputs=[audio_input, num_speakers],
+            # inputs=[audio_input, num_speakers],
+            inputs=[audio_input],
             outputs=[rttm_output, status_output, output_dir]
         )
     

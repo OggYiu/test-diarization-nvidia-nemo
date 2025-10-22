@@ -102,16 +102,7 @@ def create_interface():
         gr.Markdown(
             """
             # ✂️ Audio Chopper Tool
-            
-            Upload an audio file and its corresponding RTTM (diarization) file to chop the audio
-            into segments based on speaker turns. Each segment will be saved as a separate audio file.
-            
-            **How it works:**
-            1. Upload your audio file (WAV format recommended)
-            2. Upload the RTTM file containing diarization results
-            3. Set the padding (optional) to add silence before/after each segment
-            4. Click "Chop Audio" to process
-            5. Download the ZIP file containing all segments
+
             """
         )
         
@@ -142,15 +133,6 @@ def create_interface():
                 
                 process_btn = gr.Button("✂️ Chop Audio", variant="primary", size="lg")
                 
-                gr.Markdown(
-                    """
-                    ### 📝 Notes:
-                    - Audio format: WAV is recommended
-                    - RTTM file should match the audio file
-                    - Padding adds silence to prevent cutting off speech
-                    - All segments will be packaged into a ZIP file
-                    """
-                )
             
             with gr.Column(scale=2):
                 gr.Markdown("### 📤 Results")
@@ -174,32 +156,6 @@ def create_interface():
                     label="Download Chopped Segments (ZIP)",
                     interactive=False
                 )
-        
-        # Examples
-        gr.Markdown("### 📂 Example")
-        gr.Examples(
-            examples=[
-                [
-                    "./demo/phone_recordings/test.wav",
-                    "./demo/output/pred_rttms/test.rttm",
-                    0
-                ],
-            ],
-            inputs=[audio_input, rttm_input, padding_slider],
-            label="Try with sample files"
-        )
-        
-        # Footer
-        gr.Markdown(
-            """
-            ---
-            ### 💡 Tips:
-            - **What is RTTM?** RTTM (Rich Transcription Time Marked) files contain speaker diarization results
-            - **What is padding?** Padding adds a small buffer before/after each segment to avoid cutting speech
-            - **File naming:** Segments are named as `segment_001.wav`, `segment_002.wav`, etc.
-            - **Multiple speakers:** The tool handles conversations with multiple speakers automatically
-            """
-        )
         
         # Connect the button to the processing function
         process_btn.click(

@@ -207,16 +207,6 @@ def create_interface():
         gr.Markdown(
             """
             # 🎤 Batch Speech-to-Text Transcription
-            
-            Upload multiple audio files to transcribe them using the SenseVoice model.
-            The tool will process each file and generate transcriptions with emotion and event detection.
-            
-            **Features:**
-            - 🌐 Multi-language support (Chinese, English, Japanese, Korean, Cantonese)
-            - 😊 Emotion detection (Happy, Sad, Angry, Surprised, etc.)
-            - 🎵 Event detection (Music, Applause, Laughter, Cough, etc.)
-            - 📝 Batch processing of multiple files
-            - 💾 Export to JSON and plain text formats
             """
         )
         
@@ -240,22 +230,6 @@ def create_interface():
                 
                 process_btn = gr.Button("🚀 Start Transcription", variant="primary", size="lg")
                 
-                gr.Markdown(
-                    """
-                    ### 📝 Notes:
-                    - **Supported formats:** WAV, MP3, FLAC, M4A
-                    - **Model:** SenseVoiceSmall
-                    - **Language codes:**
-                      - `auto`: Auto-detect
-                      - `zh`: Mandarin Chinese
-                      - `en`: English
-                      - `yue`: Cantonese (default)
-                      - `ja`: Japanese
-                      - `ko`: Korean
-                    - **File ordering:** Files are processed in alphabetical order
-                    - **Processing time:** Varies based on audio length
-                    """
-                )
             
             with gr.Column(scale=2):
                 gr.Markdown("### 📤 Results")
@@ -267,51 +241,10 @@ def create_interface():
                     interactive=False
                 )
                 
-                with gr.Row():
-                    json_download = gr.File(
-                        label="Download JSON",
-                        interactive=False
-                    )
-                    
-                    txt_download = gr.File(
-                        label="Download Conversation Text",
-                        interactive=False
-                    )
-                
                 zip_download = gr.File(
                     label="Download All Results (ZIP)",
                     interactive=False
                 )
-        
-        # Examples section
-        gr.Markdown("### 📂 Example Files")
-        gr.Markdown(
-            """
-            Upload your chopped audio segments (e.g., from the Audio Chopper tool) or any audio files you want to transcribe.
-            The files will be processed in alphabetical order, so name them accordingly (e.g., segment_001.wav, segment_002.wav).
-            """
-        )
-        
-        # Footer with tips
-        gr.Markdown(
-            """
-            ---
-            ### 💡 Tips:
-            - **Batch processing:** Upload all your audio segments at once for efficient processing
-            - **File naming:** For conversation transcripts, name files like `segment_001.wav`, `segment_002.wav`
-            - **Speaker identification:** Files with `speaker_N` in the name will be labeled accordingly in the output
-            - **Emotions & Events:** The model automatically detects emotions (😊😔😡) and events (🎼👏😀)
-            - **Output formats:**
-              - `transcriptions.json`: Detailed results with raw and formatted text
-              - `conversation.txt`: Simple conversation format for easy reading
-            
-            ### 🔗 Workflow:
-            1. **Diarization** → Identify speakers and their speaking times
-            2. **Audio Chopper** → Split audio into segments based on speaker turns
-            3. **Batch STT** (this tool) → Transcribe each segment
-            4. **Analysis** → Analyze the conversation using LLM
-            """
-        )
         
         # Connect the button to the processing function
         process_btn.click(
