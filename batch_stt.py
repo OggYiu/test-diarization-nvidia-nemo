@@ -192,7 +192,7 @@ def transcribe_audio(audio_path, language="auto"):
         return None
 
 
-def process_folder(input_folder, output_file=None, language="auto"):
+def process_folder(input_folder, output_file=None, language="yue"):
     """Process all .wav files in a folder."""
     input_path = Path(input_folder)
     
@@ -276,20 +276,13 @@ def main():
         default=os.path.join(".", "demo", "transcriptions", "transcriptions.json"),
         help="Output JSON file path (default: ./demo/transcriptions/transcriptions.json)"
     )
-    parser.add_argument(
-        "-l", "--language",
-        type=str,
-        choices=["auto", "zh", "en", "yue", "ja", "ko", "nospeech"],
-        default="auto",
-        help="Language code (default: auto)"
-    )
-    parser.add_argument(
-        "--model-size",
-        type=str,
-        choices=["small", "large", "custom"],
-        default="small",
-        help="SenseVoice model size to use (small or large). Use 'custom' with --model-name to specify an exact model string."
-    )
+    # parser.add_argument(
+    #     "-l", "--language",
+    #     type=str,
+    #     choices=["auto", "zh", "en", "yue", "ja", "ko", "nospeech"],
+    #     default="auto",
+    #     help="Language code (default: auto)"
+    # )
     parser.add_argument(
         "--model-name",
         type=str,

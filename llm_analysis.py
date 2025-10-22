@@ -4,11 +4,12 @@ from langchain_ollama import ChatOllama
 import argparse
 from pathlib import Path
 
-default_model = "deepsek-r1:32b"
+# default_model = "deepsek-r1:32b"
 # model = "gemma3:270m"
-# model = "qwen2.5:7b-instruct"
+default_model = "qwen2.5vl:32b"
 # model = "qwen3:30b"
 
+# https://ip-address:8901/v1/chat/completions
 default_ollama_url = "http://192.168.61.2:11434"
 # default_ollama_url = "http://127.0.0.1:11434"
 

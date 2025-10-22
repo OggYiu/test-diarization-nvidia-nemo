@@ -64,15 +64,79 @@ coverage.xml
 # VS Code
 .vscode/
 
-# Audio files
+# Audio files (typically >50MB)
 *.wav
 *.mp3
+*.flac
+*.aac
+*.ogg
+*.m4a
+*.wma
+*.aiff
+*.opus
 
-# Output folders
+# Video files (typically >50MB)
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.flv
+*.wmv
+*.webm
+
+# Model files and weights (typically >50MB)
+*.bin
+*.h5
+*.pb
+*.onnx
+*.pth
+*.pt
+*.ckpt
+*.safetensors
+*.pkl
+*.pickle
+
+# Compressed archives (potentially >50MB)
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.rar
+*.7z
+*.gz
+
+# Output and temporary folders
 demo/output/
+demo/phone_recordings/
+demo/speaker_separated/
+demo/transcriptions/
+output/
+output_*/
+test_output/
+temp/
+**/audio_chunks/
+**/speaker_segments/
+**/chopped_audios/
+**/speaker_outputs/
+**/vad_outputs/
+**/pred_rttms/
+diarization-api/output/
+diarization-api/phone_recordings/
+
+# Log files
+*.log
+error.log
 
 # System files
 .DS_Store
 Thumbs.db
 
-*.tar
+# Large JSON files from processing
+**/pipeline_summary.json
+**/full_results.json
+
+# Note: Git doesn't natively enforce file size limits.
+# To prevent files >50MB from being committed, consider:
+# 1. Using Git LFS (Large File Storage) for large files
+# 2. Adding a pre-commit hook to check file sizes
+# 3. Running: git config --local core.bigFileThreshold 50m

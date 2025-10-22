@@ -5,6 +5,7 @@ import shutil
 import wave
 import numpy as np
 from pydub import AudioSegment
+import argparse
 
 
 def read_rttm_file(rttm_path):
@@ -174,18 +175,73 @@ def chop_audio_file(wav_path, segments, output_folder, padding_ms=100):
               f"duration: {duration_sec:.2f}s, speaker: {speaker})")
 
 
-def chop_all_audio_files(wav_folder, rttm_folder, output_folder, filename=None, padding_ms=100):
+def chop_all_audio_files(wav_folder, rttm_path, output_folder, filename=None, padding_ms=100):
     """
     Process audio files based on their RTTM diarization results.
     
     Args:
         wav_folder: Folder containing WAV files
-        rttm_folder: Folder containing RTTM files
+        rttm_path: Path to RTTM file or folder containing RTTM files
         output_folder: Folder to save chopped audio files
         filename: Optional filename (without extension) to process. If None, processes all files.
                   Example: "201" will process "201.wav" and "201.rttm"
         padding_ms: Padding in milliseconds to add before/after each segment
     """
+    # Detect if rttm_path is a file or folder
+    is_rttm_file = os.path.isfile(rttm_path) and rttm_path.endswith('.rttm')
+    
+    # If rttm_path is a specific RTTM file, process it directly
+    if is_rttm_file:
+        print("=" * 60)
+        print(f"Processing RTTM file: {rttm_path}")
+        print("=" * 60)
+        
+        if not os.path.exists(rttm_path):
+            print(f"Error: RTTM file not found: {rttm_path}")
+            return
+        
+        print(f"Reading RTTM file: {rttm_path}")
+        segments = read_rttm_file(rttm_path)
+        
+        if not segments:
+            print("No segments found in RTTM file!")
+            return
+        
+        print(f"Found {len(segments)} segments\n")
+        
+        # Extract filename from the RTTM segments or use provided filename
+        if filename:
+            wav_filename = filename
+        else:
+            # Use the filename from the first segment
+            wav_filename = segments[0]['filename']
+        
+        # Find the corresponding WAV file
+        wav_path = os.path.join(wav_folder, f"{wav_filename}.wav")
+        
+        # Clear output folder before writing chopped files
+        if os.path.exists(output_folder):
+            try:
+                for child in Path(output_folder).iterdir():
+                    if child.is_file() or child.is_symlink():
+                        child.unlink()
+                    elif child.is_dir():
+                        shutil.rmtree(child)
+            except Exception as e:
+                print(f"Warning: failed to clear output folder '{output_folder}': {e}")
+        else:
+            os.makedirs(output_folder, exist_ok=True)
+
+        chop_audio_file(wav_path, segments, output_folder, padding_ms)
+        
+        print("\n" + "=" * 60)
+        print("Processing complete!")
+        print("=" * 60)
+        return
+    
+    # Otherwise, treat rttm_path as a folder
+    rttm_folder = rttm_path
+    
     # If filename is specified, process only that file
     if filename:
         print("=" * 60)
@@ -193,13 +249,13 @@ def chop_all_audio_files(wav_folder, rttm_folder, output_folder, filename=None, 
         print("=" * 60)
         
         # Read the specific RTTM file
-        rttm_path = os.path.join(rttm_folder, f"{filename}.rttm")
-        if not os.path.exists(rttm_path):
-            print(f"Error: RTTM file not found: {rttm_path}")
+        rttm_file_path = os.path.join(rttm_folder, f"{filename}.rttm")
+        if not os.path.exists(rttm_file_path):
+            print(f"Error: RTTM file not found: {rttm_file_path}")
             return
         
-        print(f"Reading RTTM file: {rttm_path}")
-        segments = read_rttm_file(rttm_path)
+        print(f"Reading RTTM file: {rttm_file_path}")
+        segments = read_rttm_file(rttm_file_path)
         
         if not segments:
             print("No segments found in RTTM file!")
@@ -231,7 +287,7 @@ def chop_all_audio_files(wav_folder, rttm_folder, output_folder, filename=None, 
         print("=" * 60)
         return
     
-    # Otherwise, process all files
+    # Otherwise, process all files in folder
     print("=" * 60)
     print("Reading RTTM files...")
     print("=" * 60)
@@ -276,27 +332,54 @@ def chop_all_audio_files(wav_folder, rttm_folder, output_folder, filename=None, 
 
 
 if __name__ == "__main__":
-    # Configuration
-    RTTM_FOLDER = "demo/output/pred_rttms"
-    WAV_FOLDER = "demo/phone_recordings"  # Current directory (adjust if needed)
-    OUTPUT_FOLDER = "demo/output/chopped_audios"
-    PADDING_MS = 0  # 100ms padding before/after each segment
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(
+        description="Chop audio files based on RTTM diarization results"
+    )
+    parser.add_argument(
+        "--rttm-path",
+        type=str,
+        default="demo/output/pred_rttms",
+        help="Path to RTTM file or folder containing RTTM files (default: demo/output/pred_rttms)"
+    )
+    parser.add_argument(
+        "--wav-folder",
+        type=str,
+        default="demo/phone_recordings",
+        help="Path to folder containing WAV files (default: demo/phone_recordings)"
+    )
+    parser.add_argument(
+        "--output-folder",
+        type=str,
+        default="demo/output/chopped_audios",
+        help="Path to folder for saving chopped audio files (default: demo/output/chopped_audios)"
+    )
+    parser.add_argument(
+        "--filename",
+        type=str,
+        default="test",
+        help="Filename (without extension) to process. Use 'all' to process all files (default: test)"
+    )
+    parser.add_argument(
+        "--padding-ms",
+        type=int,
+        default=0,
+        help="Padding in milliseconds to add before/after each segment (default: 0)"
+    )
     
-    # Example 1: Process a specific file (uncomment to use)
-    # chop_all_audio_files(
-    #     wav_folder=WAV_FOLDER,
-    #     rttm_folder=RTTM_FOLDER,
-    #     output_folder=OUTPUT_FOLDER,
-    #     filename="201",  # Just the filename without extension
-    #     padding_ms=PADDING_MS
-    # )
+    args = parser.parse_args()
     
-    filename="test"
-
-    # Example 2: Process all files
+    # Configuration from arguments
+    RTTM_PATH = args.rttm_path
+    WAV_FOLDER = args.wav_folder
+    OUTPUT_FOLDER = args.output_folder
+    PADDING_MS = args.padding_ms
+    filename = None if args.filename.lower() == 'all' else args.filename
+    
+    # Process audio files
     chop_all_audio_files(
         wav_folder=WAV_FOLDER,
-        rttm_folder=RTTM_FOLDER,
+        rttm_path=RTTM_PATH,
         output_folder=OUTPUT_FOLDER,
         filename=filename,  # None means process all files
         padding_ms=PADDING_MS
