@@ -6,6 +6,13 @@ matplotlib>=3.7
 pydub>=0.25
 wget>=3.2
 omegaconf>=2.3
+scipy>=1.10
+
+# Audio Enhancement
+noisereduce>=2.0  # Optional but highly recommended for better noise reduction
+torchaudio>=0.12.0  # Required for Highpass/Lowpass filters
+soundfile>=0.12.1  # Required for audio I/O (avoids torchcodec dependency)
+scipy>=1.10  # Required for audio filtering fallback
 
 # NVIDIA NeMo (ASR / diarization)
 # nemo_toolkit is not available on PyPI with full functionality and usually

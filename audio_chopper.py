@@ -160,10 +160,11 @@ def chop_audio_file(wav_path, segments, output_folder, padding_ms=100):
         # Extract the segment
         segment_audio = audio[start_ms:end_ms]
         
-        # Create output filename
+        # Create output filename with start time, duration, and speaker
         speaker = segment['speaker']
-        # output_filename = f"{base_filename}_{speaker}_segment_{i:03d}.wav"
-        output_filename = f"segment_{i:03d}.wav"
+        start_time_formatted = int(segment['start'] * 1000)  # Convert to milliseconds as integer
+        duration_formatted = int(segment['duration'] * 1000)  # Convert to milliseconds as integer
+        output_filename = f"segment_{i:03d}_{start_time_formatted:04d}_{duration_formatted:04d}_{speaker}.wav"
         output_path = os.path.join(output_folder, output_filename)
         
         # Save the segment

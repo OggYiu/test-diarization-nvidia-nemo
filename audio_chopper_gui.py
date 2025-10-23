@@ -8,14 +8,15 @@ import zipfile
 from audio_chopper import chop_audio_file, read_rttm_file
 
 
-def process_audio_chopping(audio_file, rttm_file, padding_ms):
+def process_audio_chopping(audio_file, rttm_file):
+    padding_ms = 500
+
     """
     Process audio file and RTTM file to chop audio into segments.
     
     Args:
         audio_file: Audio file from Gradio interface
         rttm_file: RTTM file from Gradio interface
-        padding_ms: Padding in milliseconds to add before/after each segment
     
     Returns:
         tuple: (zip_file_path, status_message, file_list)
@@ -122,15 +123,6 @@ def create_interface():
                     file_count="single"
                 )
                 
-                padding_slider = gr.Slider(
-                    minimum=0,
-                    maximum=1000,
-                    value=0,
-                    step=10,
-                    label="Padding (milliseconds)",
-                    info="Add silence before/after each segment"
-                )
-                
                 process_btn = gr.Button("✂️ Chop Audio", variant="primary", size="lg")
                 
             
@@ -160,7 +152,7 @@ def create_interface():
         # Connect the button to the processing function
         process_btn.click(
             fn=process_audio_chopping,
-            inputs=[audio_input, rttm_input, padding_slider],
+            inputs=[audio_input, rttm_input],
             outputs=[download_output, status_output, segment_details]
         )
     

@@ -134,8 +134,23 @@ def format_str_v3(s):
 def load_audio(audio_path, target_sr=16000):
     """Load audio file and resample to target sample rate."""
     try:
-        # Load audio using torchaudio
-        waveform, sample_rate = torchaudio.load(audio_path)
+        # Try to load with soundfile backend first (avoids torchcodec dependency)
+        try:
+            import soundfile as sf
+            data, sample_rate = sf.read(audio_path)
+            # Convert to torch tensor and add channel dimension
+            waveform = torch.from_numpy(data).float()
+            if len(waveform.shape) == 1:
+                waveform = waveform.unsqueeze(0)  # Add channel dimension
+            else:
+                waveform = waveform.T  # soundfile returns (samples, channels), we need (channels, samples)
+        except Exception as e:
+            # Fallback to torchaudio with explicit backend
+            try:
+                waveform, sample_rate = torchaudio.load(audio_path, backend="soundfile")
+            except:
+                # Last resort: try default backend
+                waveform, sample_rate = torchaudio.load(audio_path)
         
         # Convert to mono if stereo
         if waveform.shape[0] > 1:
