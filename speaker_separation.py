@@ -12,6 +12,7 @@ from pathlib import Path
 import numpy as np
 import torch
 import torchaudio
+import soundfile as sf
 from nemo.collections.asr.models import ClusteringDiarizer
 from omegaconf import OmegaConf
 import json
@@ -240,9 +241,18 @@ def separate_speakers(audio_file, rttm_file, output_dir):
     print("STEP 2: Speaker Separation")
     print("="*60)
     
-    # Load audio
+    # Load audio using soundfile (to avoid torchcodec dependency)
     print(f"\n📂 Loading audio: {audio_file}")
-    waveform, sample_rate = torchaudio.load(audio_file)
+    audio_data, sample_rate = sf.read(str(audio_file), dtype='float32')
+    
+    # Convert to torch tensor and ensure correct shape [channels, samples]
+    if audio_data.ndim == 1:
+        # Mono audio
+        waveform = torch.from_numpy(audio_data).unsqueeze(0)
+    else:
+        # Stereo or multi-channel: transpose to [channels, samples]
+        waveform = torch.from_numpy(audio_data.T)
+    
     print(f"✓ Audio loaded: {waveform.shape}, sample rate: {sample_rate} Hz")
     
     # Convert to mono if stereo
@@ -281,9 +291,11 @@ def separate_speakers(audio_file, rttm_file, output_dir):
         # Create audio with only this speaker
         speaker_audio = create_speaker_audio(waveform, sample_rate, segments, speaker)
         
-        # Save to file
+        # Save to file using soundfile (to avoid torchcodec dependency)
         output_file = output_path / f"speaker_{i}_only.wav"
-        torchaudio.save(output_file, speaker_audio, sample_rate)
+        # Convert tensor to numpy and transpose to [samples, channels] format
+        audio_numpy = speaker_audio.numpy().T
+        sf.write(str(output_file), audio_numpy, sample_rate)
         
         # Calculate non-silent duration
         speaker_segments = [s for s in segments if s['speaker'] == speaker]
