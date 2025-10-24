@@ -13,12 +13,10 @@ from typing import Dict, List, Tuple
 
 # Common model options
 MODEL_OPTIONS = [
-    "qwen2.5vl:32b",
+    "deepseek-r1:14b",
+    "deepseek-r1:32b",
     "gpt-oss:20b",
     "qwen3:30b",
-    "deepseek-r1:32b",
-    "llama3.1:70b",
-    "mistral:7b",
 ]
 
 # Default configuration
