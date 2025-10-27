@@ -1,4 +1,4 @@
-#!C:\projects\phone-call-analyzer\test-diarization\.venv\Scripts\python.exe
+#!c:\projects\test-diarization\.venv\Scripts\python.exe
 
 import sys
 import json

@@ -9,6 +9,7 @@ import librosa
 import matplotlib.pyplot as plt
 from IPython.display import Audio
 from omegaconf import OmegaConf
+import torch
 
 # Try to import NVIDIA NeMo collections; provide clear instructions if missing
 try:
@@ -57,6 +58,13 @@ def diarize_audio(audio_filepath, out_dir, num_speakers=2):
         manifest_filepath = temp_manifest.name
     
     try:
+        # Detect device: use GPU if available, otherwise fall back to CPU
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        # device = 'cpu'
+        print(f"Using device: {device}")
+        if device == 'cuda':
+            print(f"GPU: {torch.cuda.get_device_name(0)}")
+        
         # Create configuration
         CONFIG = OmegaConf.create({
             'batch_size': 32,  # Top-level for embedding extraction batching
@@ -120,13 +128,14 @@ def diarize_audio(audio_filepath, out_dir, num_speakers=2):
                 }
             },
             'num_workers': 0,
-            'device': 'cpu'
+            'device': device
         })
         
         # Run diarization
         diarizer = ClusteringDiarizer(cfg=CONFIG)
         diarizer.diarize()
         
+        print(f"{'*' * 50} out_dir: {out_dir}")
         # Find and read the .rttm file
         rttm_dir = os.path.join(out_dir, 'pred_rttms')
         if not os.path.exists(rttm_dir):

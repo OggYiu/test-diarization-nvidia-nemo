@@ -47,9 +47,76 @@ current_model_name = None
 # 1. SPEAKER DIARIZATION FUNCTIONS
 # ============================================================================
 
+# CSV file to cache diarization results
+DIARIZATION_CSV = "diarization.csv"
+
+def load_diarization_cache():
+    """
+    Load cached diarization results from CSV file.
+    
+    Returns:
+        dict: Dictionary mapping filename to cached results
+    """
+    cache = {}
+    if os.path.exists(DIARIZATION_CSV):
+        try:
+            with open(DIARIZATION_CSV, 'r', encoding='utf-8', newline='') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    cache[row['filename']] = {
+                        'rttm_content': row['rttm_content'],
+                        'processing_time': float(row['processing_time']),
+                        'num_segments': int(row['num_segments']),
+                        'num_speakers': int(row['num_speakers']),
+                        'speaker_ids': row['speaker_ids'],
+                        'timestamp': row['timestamp']
+                    }
+        except Exception as e:
+            print(f"Warning: Could not load diarization cache: {e}")
+    return cache
+
+def save_diarization_to_cache(filename, rttm_content, processing_time, num_segments, num_speakers, speaker_ids):
+    """
+    Save diarization result to CSV cache.
+    
+    Args:
+        filename: Name of the audio file
+        rttm_content: RTTM content string
+        processing_time: Time taken to process
+        num_segments: Number of segments detected
+        num_speakers: Number of speakers detected
+        speaker_ids: Comma-separated speaker IDs
+    """
+    # Check if file exists to determine if we need to write headers
+    file_exists = os.path.exists(DIARIZATION_CSV)
+    
+    try:
+        with open(DIARIZATION_CSV, 'a', encoding='utf-8', newline='') as f:
+            fieldnames = ['filename', 'rttm_content', 'processing_time', 'num_segments', 
+                         'num_speakers', 'speaker_ids', 'timestamp']
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            
+            # Write header if file is new
+            if not file_exists:
+                writer.writeheader()
+            
+            # Write the data
+            writer.writerow({
+                'filename': filename,
+                'rttm_content': rttm_content,
+                'processing_time': processing_time,
+                'num_segments': num_segments,
+                'num_speakers': num_speakers,
+                'speaker_ids': speaker_ids,
+                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            })
+    except Exception as e:
+        print(f"Warning: Could not save to diarization cache: {e}")
+
 def process_audio(audio_file):
     """
     Process audio file through diarization and return results.
+    Checks cache first to avoid reprocessing.
     
     Args:
         audio_file: Audio file from Gradio interface
@@ -61,11 +128,36 @@ def process_audio(audio_file):
         return "Please upload an audio file.", "❌ No file uploaded", ""
     
     try:
+        filename = os.path.basename(audio_file)
+        
+        # Check if this file has been processed before
+        cache = load_diarization_cache()
+        if filename in cache:
+            cached = cache[filename]
+            
+            # Create status message from cached data
+            status = f"💾 Loading cached results for: {filename}\n"
+            status += f"📅 Previously processed: {cached['timestamp']}\n\n"
+            status += "✅ Results loaded from cache!"
+            
+            summary = f"📈 Summary:\n"
+            summary += f"  • Total segments: {cached['num_segments']}\n"
+            summary += f"  • Detected speakers: {cached['num_speakers']}\n"
+            summary += f"  • Speaker IDs: {cached['speaker_ids']}\n"
+            summary += f"  • Original processing time: {cached['processing_time']:.2f} seconds ({cached['processing_time']/60:.2f} minutes)\n"
+            summary += f"  • ⚡ Cache hit - instant retrieval!\n\n"
+            
+            # Create a temporary output directory for consistency
+            temp_out_dir = tempfile.mkdtemp(prefix="diarization_cached_")
+            
+            return cached['rttm_content'], summary + status, temp_out_dir
+        
+        # Not in cache, proceed with normal processing
         # Create a temporary output directory
         temp_out_dir = tempfile.mkdtemp(prefix="diarization_")
         
         # Run diarization with timing
-        status = f"🔄 Processing audio file: {os.path.basename(audio_file)}\n"
+        status = f"🔄 Processing audio file: {filename}\n"
         status += f"📁 Output directory: {temp_out_dir}\n\n"
         
         start_time = time.time()
@@ -91,11 +183,24 @@ def process_audio(audio_file):
                 if len(parts) >= 8:
                     speakers.add(parts[7])
         
+        speaker_ids_str = ', '.join(sorted(speakers))
+        
         summary = f"📈 Summary:\n"
         summary += f"  • Total segments: {num_segments}\n"
         summary += f"  • Detected speakers: {len(speakers)}\n"
-        summary += f"  • Speaker IDs: {', '.join(sorted(speakers))}\n"
-        summary += f"  • Processing time: {processing_time:.2f} seconds ({processing_time/60:.2f} minutes)\n\n"
+        summary += f"  • Speaker IDs: {speaker_ids_str}\n"
+        summary += f"  • Processing time: {processing_time:.2f} seconds ({processing_time/60:.2f} minutes)\n"
+        summary += f"  • 💾 Results saved to cache for future use\n\n"
+        
+        # Save to cache
+        save_diarization_to_cache(
+            filename=filename,
+            rttm_content=rttm_content,
+            processing_time=processing_time,
+            num_segments=num_segments,
+            num_speakers=len(speakers),
+            speaker_ids=speaker_ids_str
+        )
         
         return rttm_content, summary + status, temp_out_dir
         

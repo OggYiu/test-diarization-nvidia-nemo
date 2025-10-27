@@ -140,3 +140,5 @@ Thumbs.db
 # 1. Using Git LFS (Large File Storage) for large files
 # 2. Adding a pre-commit hook to check file sizes
 # 3. Running: git config --local core.bigFileThreshold 50m
+
+/NeMo/

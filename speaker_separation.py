@@ -341,7 +341,7 @@ def main():
         "audio_file",
         nargs='?',
         type=str,
-        default="demo/phone_recordings/test.wav",
+        default="test.wav",
         help="Path to audio file (default: demo/phone_recordings/test.wav)"
     )
     parser.add_argument(

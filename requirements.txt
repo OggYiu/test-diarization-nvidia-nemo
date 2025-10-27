@@ -1,52 +1,30 @@
-# Requirements for test-diarization project
-# Core libraries
-numpy>=1.24
-librosa>=0.10
-matplotlib>=3.7
-pydub>=0.25
-wget>=3.2
-omegaconf>=2.3
-scipy>=1.10
+# Requirements for unified_gui.py
+# Phone Call Analysis Suite - Unified GUI
 
-# Gradio UI
+# Core UI Framework
 gradio>=4.0.0
 
-# Audio Enhancement
-noisereduce>=2.0  # Optional but highly recommended for better noise reduction
-torchaudio>=0.12.0  # Required for Highpass/Lowpass filters
-soundfile>=0.12.1  # Required for audio I/O (avoids torchcodec dependency)
+# Deep Learning & Audio Processing
+torch>=2.0.0
+torchaudio>=2.0.0
 
-# Speech Recognition (FunASR for SenseVoice)
+# Speech Recognition & ASR
 funasr>=1.0.0
 
-# LLM Analysis
-langchain==0.3.15
-langchain-ollama==0.2.0
+# LLM Integration
+langchain-ollama>=0.1.0
 
-# NVIDIA NeMo (ASR / diarization)
-# nemo_toolkit is not available on PyPI with full functionality and usually
-# requires installation via pip from the NVIDIA index or by following
-# NeMo installation docs. See notes below for recommended installation.
+# Audio File I/O
+soundfile>=0.12.0
 
-# Small helper for RTTM conversions (comes with NeMo):
-# nemo_toolkit[all]  # Install using NeMo instructions (see notes)
-
-# Notes / suggested install commands (do NOT put these lines in pip install):
-# PyTorch (torch) is required at runtime. It's intentionally not pinned here
-# because you must choose the correct wheel for your Python and CUDA setup.
-# Examples (run in PowerShell):
-#  - CPU-only (recommended if you don't have CUDA):
-#      pip install torch --index-url https://download.pytorch.org/whl/cpu
-#  - CUDA (example for CUDA 11.8 - change cu118 to your CUDA version):
-#      pip install --pre torch --index-url https://download.pytorch.org/whl/cu118
-# After installing torch, install the rest of the requirements with:
-#      pip install -r requirements.txt
+# Note: This script also imports from local modules:
+# - diarization.py
+# - audio_chopper.py
+# - batch_stt.py
+# - speaker_separation.py
+# - audio_enhancement.py
 #
-# NVIDIA NeMo (ASR / diarization):
-# Install NeMo after torch. Example (uses NVIDIA PyPI index):
-#      pip install nemo_toolkit[all] --extra-index-url https://pypi.ngc.nvidia.com
-# If you only need specific NeMo collections (e.g., collections.asr), see the
-# NeMo docs for minimal installation flags to reduce installed packages.
+# These modules may have additional dependencies.
+# If you need a complete requirements file for the entire project,
+# you'll need to check those modules as well.
 
-# Optional / dev
-ipython>=8.15
