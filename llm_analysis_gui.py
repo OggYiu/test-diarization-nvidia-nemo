@@ -10,7 +10,7 @@ import traceback
 
 # Common model options
 MODEL_OPTIONS = [
-    "qwen3:30b",
+    "qwen3:32b",
     # "qwen2.5vl:32b",
     "gpt-oss:20b",
     "gemma3-27b",

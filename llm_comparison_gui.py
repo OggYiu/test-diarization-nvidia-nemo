@@ -13,14 +13,14 @@ from typing import Dict, List, Tuple
 
 # Common model options
 MODEL_OPTIONS = [
-    "deepseek-r1:14b",
     "deepseek-r1:32b",
     "gpt-oss:20b",
-    "qwen3:30b",
+    "qwen3:32b",
 ]
 
 # Default configuration
-DEFAULT_OLLAMA_URL = "http://192.168.61.2:11434"
+# DEFAULT_OLLAMA_URL = "http://192.168.61.2:11434"
+DEFAULT_OLLAMA_URL = "http://localhost:11434"
 DEFAULT_SYSTEM_MESSAGE = (
     "你是一位精通粵語以及香港股市的分析師。請用繁體中文回應，"
     "並從下方對話中判斷誰是券商、誰是客戶，整理最終下單（股票代號、買/賣、價格、數量），"

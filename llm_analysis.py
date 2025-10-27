@@ -7,7 +7,7 @@ from pathlib import Path
 # default_model = "deepsek-r1:32b"
 # model = "gemma3:270m"
 default_model = "qwen2.5vl:32b"
-# model = "qwen3:30b"
+# model = "qwen3:32b"
 
 # https://ip-address:8901/v1/chat/completions
 default_ollama_url = "http://192.168.61.2:11434"

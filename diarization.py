@@ -3,6 +3,7 @@ import json
 import tempfile
 import argparse
 import shutil
+import platform
 import wget  # For downloading sample audio if needed
 import numpy as np
 import librosa
@@ -59,15 +60,36 @@ def diarize_audio(audio_filepath, out_dir, num_speakers=2):
     
     try:
         # Detect device: use GPU if available, otherwise fall back to CPU
-        device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        # device = 'cpu'
+        # device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        device = 'cpu'
         print(f"Using device: {device}")
         if device == 'cuda':
             print(f"GPU: {torch.cuda.get_device_name(0)}")
         
+        # Detect OS
+        is_windows = platform.system() == 'Windows'
+        
+        # Set batch sizes and num_workers based on device and OS
+        # GPU: Use larger batches and parallel workers for better utilization
+        # CPU: Use smaller batches and no workers to avoid overhead
+        # Windows: Always use num_workers=0 to avoid multiprocessing handle errors
+        if device == 'cuda':
+            batch_size = 64
+            vad_batch_size = 64
+            speaker_batch_size = 64
+            # On Windows, multiprocessing with CUDA causes handle errors
+            num_workers = 0 if is_windows else 4
+            print(f"Using optimized settings for GPU (num_workers={num_workers} due to {'Windows' if is_windows else 'Linux/Unix'})")
+        else:
+            batch_size = 32
+            vad_batch_size = 32
+            speaker_batch_size = 32
+            num_workers = 0
+            print("Using optimized settings for CPU")
+        
         # Create configuration
         CONFIG = OmegaConf.create({
-            'batch_size': 32,  # Top-level for embedding extraction batching
+            'batch_size': batch_size,
             'sample_rate': 16000,
             'verbose': True,
             'diarizer': {
@@ -78,7 +100,7 @@ def diarize_audio(audio_filepath, out_dir, num_speakers=2):
                 'oracle_vad': False,
                 'vad': {
                     'model_path': 'vad_multilingual_marblenet',
-                    'batch_size': 32,
+                    'batch_size': vad_batch_size,
                     'parameters': {
                         'window_length_in_sec': 0.63,
                         'shift_length_in_sec': 0.08,
@@ -97,7 +119,7 @@ def diarize_audio(audio_filepath, out_dir, num_speakers=2):
                 },
                 'speaker_embeddings': {
                     'model_path': 'titanet_large',
-                    'batch_size': 32,
+                    'batch_size': speaker_batch_size,
                     'parameters': {
                         'window_length_in_sec': [1.5, 1.25, 1.0, 0.75, 0.5],
                         'shift_length_in_sec': [0.75, 0.625, 0.5, 0.375, 0.25],
@@ -127,7 +149,7 @@ def diarize_audio(audio_filepath, out_dir, num_speakers=2):
                     }
                 }
             },
-            'num_workers': 0,
+            'num_workers': num_workers,
             'device': device
         })
         

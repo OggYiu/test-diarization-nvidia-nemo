@@ -113,13 +113,14 @@ def save_diarization_to_cache(filename, rttm_content, processing_time, num_segme
     except Exception as e:
         print(f"Warning: Could not save to diarization cache: {e}")
 
-def process_audio(audio_file):
+def process_audio(audio_file, overwrite=False):
     """
     Process audio file through diarization and return results.
     Checks cache first to avoid reprocessing.
     
     Args:
         audio_file: Audio file from Gradio interface
+        overwrite: If True, reprocess even if cached results exist
     
     Returns:
         tuple: (rttm_content, status_message, output_directory_path)
@@ -130,9 +131,9 @@ def process_audio(audio_file):
     try:
         filename = os.path.basename(audio_file)
         
-        # Check if this file has been processed before
+        # Check if this file has been processed before (unless overwrite is True)
         cache = load_diarization_cache()
-        if filename in cache:
+        if filename in cache and not overwrite:
             cached = cache[filename]
             
             # Create status message from cached data
@@ -158,6 +159,8 @@ def process_audio(audio_file):
         
         # Run diarization with timing
         status = f"🔄 Processing audio file: {filename}\n"
+        if overwrite and filename in cache:
+            status += f"♻️ Overwrite mode: Reprocessing despite existing cache\n"
         status += f"📁 Output directory: {temp_out_dir}\n\n"
         
         start_time = time.time()
@@ -610,15 +613,15 @@ def process_batch_transcription(audio_files, zip_file, link_or_path, language, p
 
 # Common model options
 MODEL_OPTIONS = [
-    "qwen3:30b",
+    "qwen3:32b",
     "gpt-oss:20b",
     "gemma3-27b",
-    "deepseek-r1:14b",
     "deepseek-r1:32b",
 ]
 
 DEFAULT_MODEL = MODEL_OPTIONS[0]
-DEFAULT_OLLAMA_URL = "http://192.168.61.2:11434"
+# DEFAULT_OLLAMA_URL = "http://192.168.61.2:11434"
+DEFAULT_OLLAMA_URL = "http://localhost:11434"
 DEFAULT_SYSTEM_MESSAGE = (
     "你是一位精通粵語以及香港股市的分析師。請用繁體中文回應，"
     "並從下方對話中判斷誰是券商、誰是客戶，整理最終下單（股票代號、買/賣、價格、數量），"
@@ -1613,6 +1616,11 @@ def create_unified_interface():
                             type="filepath",
                             sources=["upload"]
                         )
+                        diar_overwrite_checkbox = gr.Checkbox(
+                            label="🔄 Overwrite existing cached RTTM data",
+                            value=False,
+                            info="If checked, will reprocess the file even if cached results exist"
+                        )
                         diar_process_btn = gr.Button("🚀 Start Diarization", variant="primary", size="lg")
                         
                     with gr.Column(scale=2):
@@ -1638,7 +1646,7 @@ def create_unified_interface():
                 
                 diar_process_btn.click(
                     fn=process_audio,
-                    inputs=[diar_audio_input],
+                    inputs=[diar_audio_input, diar_overwrite_checkbox],
                     outputs=[diar_rttm_output, diar_status_output, diar_output_dir]
                 )
             
