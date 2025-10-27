@@ -6,6 +6,7 @@ Unified Gradio GUI combining all phone call analysis tools:
 4. LLM Analysis
 5. Speaker Separation
 6. Audio Enhancement
+7. LLM Comparison
 """
 
 import os
@@ -21,6 +22,10 @@ import traceback
 import torch
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Tuple
+import urllib.request
+import urllib.parse
+from datetime import datetime, timedelta
+import csv
 
 # Import from individual modules
 from diarization import diarize_audio
@@ -104,7 +109,7 @@ def process_audio(audio_file):
 # ============================================================================
 
 def process_audio_chopping(audio_file, rttm_file, rttm_text):
-    padding_ms = 200
+    padding_ms = 100
     """
     Process audio file and RTTM file to chop audio into segments.
     
@@ -114,13 +119,13 @@ def process_audio_chopping(audio_file, rttm_file, rttm_text):
         rttm_text: RTTM text string pasted by user
     
     Returns:
-        tuple: (zip_file_path, status_message, segment_details)
+        tuple: (zip_file_path, status_message, segment_details, output_path)
     """
     if audio_file is None:
-        return None, "❌ No audio file uploaded", ""
+        return None, "❌ No audio file uploaded", "", ""
     
     if rttm_file is None and (not rttm_text or not rttm_text.strip()):
-        return None, "❌ No RTTM file uploaded or RTTM text provided", ""
+        return None, "❌ No RTTM file uploaded or RTTM text provided", "", ""
     
     try:
         # Create a temporary output directory
@@ -195,12 +200,12 @@ def process_audio_chopping(audio_file, rttm_file, rttm_text):
         for i, seg in enumerate(segments, 1):
             segment_details += f"segment_{i:03d} | {seg['speaker']} | {seg['start']:.2f} | {seg['end']:.2f} | {seg['duration']:.2f}\n"
         
-        return zip_path, status, segment_details
+        return zip_path, status, segment_details, zip_path
         
     except Exception as e:
         error_msg = f"❌ Error during audio chopping: {str(e)}"
         error_msg += f"\n\n{traceback.format_exc()}"
-        return None, error_msg, ""
+        return None, error_msg, "", ""
 
 
 # ============================================================================
@@ -273,19 +278,20 @@ def transcribe_single_audio(audio_path, language="auto"):
         return None
 
 
-def process_batch_transcription(audio_files, zip_file, language, progress=gr.Progress()):
+def process_batch_transcription(audio_files, zip_file, link_or_path, language, progress=gr.Progress()):
     """
     Process multiple audio files for transcription.
     
     Args:
         audio_files: List of audio files from Gradio interface
         zip_file: Zip file containing audio files
+        link_or_path: URL to a zip file or local folder path
         language: Language code for transcription
     
     Returns:
         tuple: (json_file, txt_file, zip_file, status_message, conversation_content)
     """
-    if (not audio_files or len(audio_files) == 0) and not zip_file:
+    if (not audio_files or len(audio_files) == 0) and not zip_file and not link_or_path:
         return None, None, None, "❌ No audio files uploaded", ""
     
     try:
@@ -338,6 +344,72 @@ def process_batch_transcription(audio_files, zip_file, language, progress=gr.Pro
                     dest_path = os.path.join(audio_dir, original_name)
                     shutil.copy2(audio_file, dest_path)
                     audio_paths.append(dest_path)
+        
+        # Handle link or path
+        if link_or_path and link_or_path.strip():
+            link_or_path = link_or_path.strip()
+            
+            # Check if it's a URL
+            if link_or_path.startswith('http://') or link_or_path.startswith('https://'):
+                status += "🔗 Downloading zip file from URL...\n"
+                try:
+                    # Download the file
+                    temp_zip = os.path.join(temp_out_dir, "downloaded.zip")
+                    urllib.request.urlretrieve(link_or_path, temp_zip)
+                    status += f"  ✅ Downloaded successfully\n"
+                    
+                    # Extract the zip file
+                    status += "📦 Extracting zip file...\n"
+                    with zipfile.ZipFile(temp_zip, 'r') as zip_ref:
+                        for file_info in zip_ref.filelist:
+                            filename = file_info.filename
+                            if not filename.endswith('/') and not os.path.basename(filename).startswith('.'):
+                                ext = os.path.splitext(filename)[1].lower()
+                                if ext in ['.wav', '.mp3', '.flac', '.m4a', '.ogg', '.opus']:
+                                    extracted_path = zip_ref.extract(file_info, audio_dir)
+                                    audio_paths.append(extracted_path)
+                                    status += f"  ✅ Extracted: {os.path.basename(filename)}\n"
+                    status += f"\n📊 Total files extracted from URL: {len(audio_paths)}\n\n"
+                except Exception as e:
+                    return None, None, None, f"❌ Error downloading/extracting from URL: {str(e)}", ""
+            
+            # Check if it's a local folder path
+            elif os.path.isdir(link_or_path):
+                status += f"📁 Reading audio files from folder: {link_or_path}\n"
+                try:
+                    # Get all audio files from the folder
+                    audio_extensions = ['.wav', '.mp3', '.flac', '.m4a', '.ogg', '.opus']
+                    for root, dirs, files in os.walk(link_or_path):
+                        for file in files:
+                            ext = os.path.splitext(file)[1].lower()
+                            if ext in audio_extensions:
+                                source_path = os.path.join(root, file)
+                                dest_path = os.path.join(audio_dir, file)
+                                shutil.copy2(source_path, dest_path)
+                                audio_paths.append(dest_path)
+                                status += f"  ✅ Copied: {file}\n"
+                    status += f"\n📊 Total files from folder: {len(audio_paths)}\n\n"
+                except Exception as e:
+                    return None, None, None, f"❌ Error reading from folder: {str(e)}", ""
+            
+            # Check if it's a local zip file path
+            elif os.path.isfile(link_or_path) and link_or_path.lower().endswith('.zip'):
+                status += f"📦 Processing local zip file: {link_or_path}\n"
+                try:
+                    with zipfile.ZipFile(link_or_path, 'r') as zip_ref:
+                        for file_info in zip_ref.filelist:
+                            filename = file_info.filename
+                            if not filename.endswith('/') and not os.path.basename(filename).startswith('.'):
+                                ext = os.path.splitext(filename)[1].lower()
+                                if ext in ['.wav', '.mp3', '.flac', '.m4a', '.ogg', '.opus']:
+                                    extracted_path = zip_ref.extract(file_info, audio_dir)
+                                    audio_paths.append(extracted_path)
+                                    status += f"  ✅ Extracted: {os.path.basename(filename)}\n"
+                    status += f"\n📊 Total files extracted from local zip: {len(audio_paths)}\n\n"
+                except Exception as e:
+                    return None, None, None, f"❌ Error extracting local zip file: {str(e)}", ""
+            else:
+                return None, None, None, f"❌ Invalid path or URL: {link_or_path}\nPlease provide a valid URL, folder path, or zip file path.", ""
         
         if len(audio_paths) == 0:
             return None, None, None, "❌ No valid audio files found", ""
@@ -617,7 +689,7 @@ def process_speaker_separation(audio_file, progress=gr.Progress()):
         tuple: (speaker_0_file, speaker_1_file, status_message)
     """
     if audio_file is None:
-        return None, None, "❌ No audio file uploaded"
+        return None, None, "[ERROR] No audio file uploaded"
     
     try:
         import soundfile as sf
@@ -626,7 +698,7 @@ def process_speaker_separation(audio_file, progress=gr.Progress()):
         temp_out_dir = tempfile.mkdtemp(prefix="speaker_separated_")
         
         status = "=" * 60 + "\n"
-        status += "🎙️  SPEAKER SEPARATION TOOL\n"
+        status += "SPEAKER SEPARATION TOOL\n"
         status += "=" * 60 + "\n"
         status += f"Input audio: {os.path.basename(audio_file)}\n"
         status += f"Output directory: {temp_out_dir}\n\n"
@@ -645,10 +717,10 @@ def process_speaker_separation(audio_file, progress=gr.Progress()):
         try:
             # Use the perform_diarization function from speaker_separation module
             rttm_file = perform_diarization(audio_file, temp_out_dir)
-            status += f"✓ Diarization complete!\n"
-            status += f"✓ RTTM file generated: {os.path.basename(rttm_file)}\n\n"
+            status += f"[OK] Diarization complete!\n"
+            status += f"[OK] RTTM file generated: {os.path.basename(rttm_file)}\n\n"
         except Exception as e:
-            error_msg = f"❌ Error during diarization: {str(e)}\n\n{traceback.format_exc()}"
+            error_msg = f"[ERROR] Error during diarization: {str(e)}\n\n{traceback.format_exc()}"
             return None, None, status + error_msg
         
         # ================================================================
@@ -661,7 +733,7 @@ def process_speaker_separation(audio_file, progress=gr.Progress()):
         status += "=" * 60 + "\n\n"
         
         # Load audio using soundfile
-        status += f"📂 Loading audio: {os.path.basename(audio_file)}\n"
+        status += f"[*] Loading audio: {os.path.basename(audio_file)}\n"
         try:
             audio_data, sample_rate = sf.read(str(audio_file), dtype='float32')
             
@@ -673,37 +745,37 @@ def process_speaker_separation(audio_file, progress=gr.Progress()):
                 # Stereo or multi-channel: transpose to [channels, samples]
                 waveform = torch.from_numpy(audio_data.T)
             
-            status += f"✓ Audio loaded: shape={waveform.shape}, sample_rate={sample_rate} Hz\n"
+            status += f"[OK] Audio loaded: shape={waveform.shape}, sample_rate={sample_rate} Hz\n"
             
             # Convert to mono if stereo
             if waveform.shape[0] > 1:
-                status += "⚙ Converting stereo to mono...\n"
+                status += "[*] Converting stereo to mono...\n"
                 waveform = torch.mean(waveform, dim=0, keepdim=True)
-                status += "✓ Converted to mono\n"
+                status += "[OK] Converted to mono\n"
             
             status += "\n"
             
         except Exception as e:
-            error_msg = f"❌ Error loading audio: {str(e)}\n{traceback.format_exc()}"
+            error_msg = f"[ERROR] Error loading audio: {str(e)}\n{traceback.format_exc()}"
             return None, None, status + error_msg
         
         progress(0.5, desc="Parsing diarization results...")
         
         # Parse RTTM file
-        status += f"📋 Parsing diarization results from: {os.path.basename(rttm_file)}\n"
+        status += f"[*] Parsing diarization results from: {os.path.basename(rttm_file)}\n"
         try:
             segments = parse_rttm_for_separation(rttm_file)
             
             if not segments:
-                error_msg = "❌ No speaker segments found in RTTM file!"
+                error_msg = "[ERROR] No speaker segments found in RTTM file!"
                 return None, None, status + error_msg
             
             # Get unique speakers
             speakers = sorted(set(seg['speaker'] for seg in segments))
-            status += f"✓ Found {len(speakers)} speaker(s): {', '.join(speakers)}\n\n"
+            status += f"[OK] Found {len(speakers)} speaker(s): {', '.join(speakers)}\n\n"
             
             # Print segment summary
-            status += "📊 Segment Summary:\n"
+            status += "[*] Segment Summary:\n"
             for speaker in speakers:
                 speaker_segments = [s for s in segments if s['speaker'] == speaker]
                 total_duration = sum(s['duration'] for s in speaker_segments)
@@ -711,13 +783,13 @@ def process_speaker_separation(audio_file, progress=gr.Progress()):
             status += "\n"
             
         except Exception as e:
-            error_msg = f"❌ Error parsing RTTM: {str(e)}\n{traceback.format_exc()}"
+            error_msg = f"[ERROR] Error parsing RTTM: {str(e)}\n{traceback.format_exc()}"
             return None, None, status + error_msg
         
         progress(0.6, desc="Creating separated audio files...")
         
         # Separate each speaker
-        status += "🎵 Creating separated audio files...\n\n"
+        status += "[*] Creating separated audio files...\n\n"
         speaker_files = []
         
         for i, speaker in enumerate(speakers):
@@ -731,8 +803,23 @@ def process_speaker_separation(audio_file, progress=gr.Progress()):
                 
                 # Save to file using soundfile
                 output_file = os.path.join(temp_out_dir, f"speaker_{i}_only.wav")
-                # Convert tensor to numpy and transpose to [samples, channels] format
-                audio_numpy = speaker_audio.numpy().T
+                
+                # Convert tensor to numpy
+                audio_numpy = speaker_audio.numpy()
+                
+                # Ensure audio_numpy is in the correct format for soundfile
+                # soundfile expects [samples] for mono or [samples, channels] for multi-channel
+                if audio_numpy.ndim == 2:
+                    # If shape is [1, samples], transpose to [samples, 1]
+                    # If shape is [channels, samples], transpose to [samples, channels]
+                    if audio_numpy.shape[0] <= 2:  # Likely [channels, samples] format
+                        audio_numpy = audio_numpy.T
+                
+                # If we have [samples, 1] format, convert to [samples] for mono
+                if audio_numpy.ndim == 2 and audio_numpy.shape[1] == 1:
+                    audio_numpy = audio_numpy.squeeze()
+                
+                status += f"    - Audio shape for saving: {audio_numpy.shape}\n"
                 sf.write(str(output_file), audio_numpy, sample_rate)
                 
                 speaker_files.append(output_file)
@@ -742,13 +829,16 @@ def process_speaker_separation(audio_file, progress=gr.Progress()):
                 active_duration = sum(s['duration'] for s in speaker_segments)
                 total_duration = waveform.shape[-1] / sample_rate
                 
-                status += f"  ✓ Saved: speaker_{i}_only.wav\n"
+                status += f"  [OK] Saved: speaker_{i}_only.wav\n"
                 status += f"    - Total duration: {total_duration:.2f}s\n"
                 status += f"    - Active speech: {active_duration:.2f}s ({active_duration/total_duration*100:.1f}%)\n"
                 status += f"    - Silenced: {total_duration - active_duration:.2f}s\n\n"
                 
             except Exception as e:
-                status += f"  ❌ Error processing speaker_{i}: {str(e)}\n\n"
+                status += f"  [ERROR] Error processing speaker_{i}: {str(e)}\n"
+                status += f"  {traceback.format_exc()}\n\n"
+                # Continue to next speaker instead of stopping completely
+                continue
         
         # ================================================================
         # Final summary
@@ -759,12 +849,12 @@ def process_speaker_separation(audio_file, progress=gr.Progress()):
         processing_time = overall_end_time - overall_start_time
         
         status += "=" * 60 + "\n"
-        status += "✅ COMPLETE!\n"
+        status += "[SUCCESS] COMPLETE!\n"
         status += "=" * 60 + "\n"
-        status += f"⏱️ Total processing time: {processing_time:.2f} seconds ({processing_time/60:.2f} minutes)\n"
-        status += f"📊 Separated files created: {len(speaker_files)}\n\n"
+        status += f"[*] Total processing time: {processing_time:.2f} seconds ({processing_time/60:.2f} minutes)\n"
+        status += f"[*] Separated files created: {len(speaker_files)}\n\n"
         
-        status += "📁 Files created:\n"
+        status += "[*] Files created:\n"
         for speaker_file in speaker_files:
             file_size = os.path.getsize(speaker_file)
             status += f"  - {os.path.basename(speaker_file)} ({file_size:,} bytes)\n"
@@ -775,7 +865,7 @@ def process_speaker_separation(audio_file, progress=gr.Progress()):
         
         # Add note if more than 2 speakers
         if len(speaker_files) > 2:
-            status += f"\n⚠️ Note: {len(speaker_files)} speakers detected. Only first 2 available for download in GUI.\n"
+            status += f"\n[WARNING] Note: {len(speaker_files)} speakers detected. Only first 2 available for download in GUI.\n"
             status += f"   All files saved in: {temp_out_dir}\n"
         
         status += "\n"
@@ -783,7 +873,7 @@ def process_speaker_separation(audio_file, progress=gr.Progress()):
         return speaker_0, speaker_1, status
         
     except Exception as e:
-        error_msg = f"❌ Error during speaker separation: {str(e)}\n\n{traceback.format_exc()}"
+        error_msg = f"[ERROR] Error during speaker separation: {str(e)}\n\n{traceback.format_exc()}"
         return None, None, error_msg
 
 
@@ -1075,6 +1165,177 @@ def format_comparison_results(results: Dict[str, Tuple[str, float]]) -> List[Tup
 
 
 # ============================================================================
+# 8. FILE METADATA EXTRACTION FUNCTIONS
+# ============================================================================
+
+def parse_filename_metadata(filename: str, csv_path: str = "client.csv") -> str:
+    """
+    Parse audio filename to extract metadata and format output.
+    
+    Expected filename format:
+    [Broker Name Broker_ID]_Unknown1-ClientPhone_YYYYMMDDHHMMSS(Unknown2).wav
+    or
+    [Broker Name]_Unknown1-ClientPhone_YYYYMMDDHHMMSS(Unknown2).wav
+    
+    Args:
+        filename: The audio filename to parse
+        csv_path: Path to client.csv file for name lookup
+        
+    Returns:
+        Formatted string with extracted metadata
+    """
+    try:
+        # Remove extension
+        base_name = os.path.splitext(filename)[0]
+        
+        # Parse filename using regex
+        # Pattern 1 (with brackets and parentheses): [Broker Name Optional_ID]_Unknown1-ClientPhone_DateTime(Unknown2)
+        pattern1 = r'\[(.*?)\]_(\d+)-(\d+)_(\d{14})\((\d+)\)'
+        match = re.match(pattern1, base_name)
+        
+        # Pattern 2 (sanitized by Gradio - no brackets or parentheses): Broker Name Optional_ID_Unknown1-ClientPhone_DateTime Unknown2
+        # Example: "Dickson Lau 0489_8330-97501167_2025101001451020981"
+        if not match:
+            pattern2 = r'(.*?)_(\d+)-(\d+)_(\d{14})(\d+)'
+            match = re.match(pattern2, base_name)
+        
+        if not match:
+            return f"""
+            ❌ Error: Filename does not match expected pattern.
+            
+            Expected format:
+            [Broker Name ID]_8330-97501167_20251010014510(20981).wav
+            
+            Received:
+            {filename}
+            
+            Note: The filename may have been sanitized by the system. 
+            Please ensure special characters are preserved or manually enter the correct format.
+            """
+        
+        broker_info = match.group(1)  # e.g., "Dickson Lau 0489" or "Dickson Lau"
+        # unknown_1 = match.group(2)     # e.g., "8330"
+        client_number = match.group(3) # e.g., "97501167"
+        datetime_str = match.group(4)  # e.g., "20251010014510"
+        # unknown_2 = match.group(5)     # e.g., "20981"
+        
+        # Parse broker name and ID
+        broker_parts = broker_info.rsplit(' ', 1)  # Split from right to handle multi-word names
+        if len(broker_parts) == 2 and broker_parts[1].isdigit():
+            broker_name = broker_parts[0]
+            broker_id = broker_parts[1]
+        else:
+            broker_name = broker_info
+            broker_id = "N/A"
+        
+        # Parse datetime (UTC)
+        try:
+            utc_dt = datetime.strptime(datetime_str, "%Y%m%d%H%M%S")
+            # Convert to HKT (UTC+8)
+            hkt_dt = utc_dt + timedelta(hours=8)
+            
+            utc_formatted = utc_dt.strftime("%Y-%m-%dT%H:%M:%S")
+            hkt_formatted = hkt_dt.strftime("%Y-%m-%dT%H:%M:%S")
+        except ValueError as e:
+            return f"❌ Error parsing datetime: {str(e)}"
+        
+        # Look up client name and ID in CSV
+        client_name = "Not found"
+        client_id = "Not found"
+        if os.path.exists(csv_path):
+            try:
+                with open(csv_path, 'r', encoding='utf-8') as csvfile:
+                    csv_reader = csv.DictReader(csvfile)
+                    for row in csv_reader:
+                        # Find name column
+                        name_col = None
+                        for col in row.keys():
+                            if 'name' in col.lower() or 'client' in col.lower():
+                                name_col = col
+                                break
+                        
+                        # Check if phone number matches any of the three phone columns
+                        # CSV format: AE,acctno,name,mobile,home,office
+                        phone_columns = ['mobile', 'home', 'office']
+                        for phone_col in phone_columns:
+                            if phone_col in row and row[phone_col].strip() == client_number:
+                                if name_col:
+                                    client_name = row[name_col].strip()
+                                # Get client ID (acctno column)
+                                if 'acctno' in row:
+                                    client_id = row['acctno'].strip()
+                                break
+                        
+                        # If we found the client, exit the loop
+                        if client_name != "Not found":
+                            break
+            except Exception as e:
+                client_name = f"Error reading CSV: {str(e)}"
+                client_id = "Error reading CSV"
+        else:
+            client_name = "client.csv not found"
+            client_id = "client.csv not found"
+        
+        # Format output as JSON
+        result_dict = {
+            "broker_name": broker_name,
+            "broker_id": broker_id,
+            "client_number": client_number,
+            "client_name": client_name,
+            "client_id": client_id,
+            "utc": utc_formatted,
+            "hkt": hkt_formatted
+        }
+        output = json.dumps(result_dict, indent=2, ensure_ascii=False)
+        
+        # Format output
+        output = f"""
+Broker Name: {broker_name}
+Broker Id: {broker_id}
+Client Number: {client_number}
+Client Name: {client_name}
+Client Id: {client_id}
+UTC: {utc_formatted}
+HKT: {hkt_formatted}
+
+{result_dict}
+"""
+        
+        return output
+        
+    except Exception as e:
+        error_msg = f"❌ Error parsing filename: {str(e)}\n\n{traceback.format_exc()}"
+        return error_msg
+
+
+def process_file_metadata(audio_file):
+    """
+    Process uploaded audio file and extract metadata from filename.
+    
+    Args:
+        audio_file: Audio file from Gradio interface
+        
+    Returns:
+        str: Formatted metadata string
+    """
+    if audio_file is None:
+        return "❌ No file uploaded. Please drag and drop an audio file."
+    
+    try:
+        # Get filename
+        filename = os.path.basename(audio_file)
+        
+        # Parse metadata
+        result = parse_filename_metadata(filename)
+        
+        return result
+        
+    except Exception as e:
+        error_msg = f"❌ Error: {str(e)}\n\n{traceback.format_exc()}"
+        return error_msg
+
+
+# ============================================================================
 # UNIFIED GRADIO INTERFACE
 # ============================================================================
 
@@ -1090,6 +1351,61 @@ def create_unified_interface():
         )
         
         with gr.Tabs():
+            
+            # ================================================================
+            # TAB 8: FILE METADATA EXTRACTION
+            # ================================================================
+            with gr.Tab("8️⃣ File Metadata"):
+                gr.Markdown("### Extract metadata from audio filename")
+                gr.Markdown("*Parse filename to extract broker info, client info, and timestamps*")
+                
+                with gr.Row():
+                    with gr.Column(scale=1):
+                        gr.Markdown("#### Input")
+                        meta_audio_input = gr.File(
+                            label="Upload Audio File",
+                            type="filepath",
+                            file_types=["audio"]
+                        )
+                        meta_process_btn = gr.Button("📋 Extract Metadata", variant="primary", size="lg")
+                        
+                        gr.Markdown("""
+                        #### Expected Filename Format:
+                        ```
+                        [Broker Name ID]_8330-97501167_20251010014510(20981).wav
+                        ```
+                        
+                        #### Components:
+                        - **[Broker Name ID]**: Broker's name and optional ID
+                        - **8330**: Unknown field 1
+                        - **97501167**: Client phone number
+                        - **20251010014510**: UTC timestamp (YYYYMMDDHHMMSS)
+                        - **(20981)**: Unknown field 2
+                        
+                        #### Example:
+                        `[Dickson Lau 0489]_8330-97501167_20251010014510(20981).wav`
+                        
+                        #### Client Lookup:
+                        Place a `client.csv` file in the same directory with columns for phone number and client name.
+                        The system will automatically look up the client name based on the phone number.
+                        """)
+                        
+                    with gr.Column(scale=2):
+                        gr.Markdown("#### Extracted Metadata")
+                        meta_output = gr.Textbox(
+                            label="Results",
+                            lines=25,
+                            max_lines=35,
+                            interactive=False,
+                            show_copy_button=True
+                        )
+                
+                meta_process_btn.click(
+                    fn=process_file_metadata,
+                    inputs=[meta_audio_input],
+                    outputs=[meta_output]
+                )
+
             # ================================================================
             # TAB 1: SPEAKER DIARIZATION
             # ================================================================
@@ -1150,19 +1466,19 @@ def create_unified_interface():
                         
                         gr.Markdown("#### RTTM Input (Choose one method)")
                         
-                        with gr.Tab("📁 Upload RTTM File"):
-                            chop_rttm_input = gr.File(
-                                label="RTTM File",
-                                file_types=[".rttm"],
-                                file_count="single"
-                            )
-                        
                         with gr.Tab("📝 Paste RTTM Text"):
                             chop_rttm_text = gr.Textbox(
                                 label="RTTM Content",
                                 placeholder="Paste RTTM content here...\nExample:\nSPEAKER test 1 0.000 2.500 <NA> <NA> speaker_0 <NA> <NA>\nSPEAKER test 1 2.500 3.200 <NA> <NA> speaker_1 <NA> <NA>",
                                 lines=10,
                                 max_lines=20
+                            )
+
+                        with gr.Tab("📁 Upload RTTM File"):
+                            chop_rttm_input = gr.File(
+                                label="RTTM File",
+                                file_types=[".rttm"],
+                                file_count="single"
                             )
                         
                         chop_process_btn = gr.Button("✂️ Chop Audio", variant="primary", size="lg")
@@ -1186,11 +1502,16 @@ def create_unified_interface():
                             label="Download Chopped Segments (ZIP)",
                             interactive=False
                         )
+                        chop_output_path = gr.Textbox(
+                            label="Output File Path",
+                            interactive=False,
+                            show_copy_button=True
+                        )
                 
                 chop_process_btn.click(
                     fn=process_audio_chopping,
                     inputs=[chop_audio_input, chop_rttm_input, chop_rttm_text],
-                    outputs=[chop_download_output, chop_status_output, chop_segment_details]
+                    outputs=[chop_download_output, chop_status_output, chop_segment_details, chop_output_path]
                 )
             
             # ================================================================
@@ -1203,6 +1524,23 @@ def create_unified_interface():
                     with gr.Column(scale=1):
                         gr.Markdown("#### Input (Choose one or both methods)")
                         
+                        with gr.Tab("🔗 Paste Link or Folder Path"):
+                            stt_link_or_path = gr.Textbox(
+                                label="Zip File URL or Folder Path",
+                                placeholder="Paste a URL to a zip file (e.g., https://example.com/audio.zip)\nor a local folder path (e.g., C:/Users/me/audio_files)",
+                                lines=2,
+                                max_lines=3
+                            )
+                            gr.Markdown("*Provide either a direct URL to a zip file or a local folder path containing audio files*")
+                        
+                        with gr.Tab("📁 Upload Audio Files"):
+                            stt_audio_files = gr.File(
+                                label="Upload Audio Files",
+                                file_count="multiple",
+                                file_types=[".wav", ".mp3", ".flac", ".m4a"],
+                                type="filepath"
+                            )
+                            
                         with gr.Tab("📦 Upload Zip File"):
                             stt_zip_file = gr.File(
                                 label="Upload Zip File Containing Audio Files",
@@ -1212,13 +1550,6 @@ def create_unified_interface():
                             )
                             gr.Markdown("*The zip file should contain audio files (.wav, .mp3, .flac, .m4a, .ogg, .opus)*")
                         
-                        with gr.Tab("📁 Upload Audio Files"):
-                            stt_audio_files = gr.File(
-                                label="Upload Audio Files",
-                                file_count="multiple",
-                                file_types=[".wav", ".mp3", ".flac", ".m4a"],
-                                type="filepath"
-                            )
                         stt_language_dropdown = gr.Dropdown(
                             choices=["auto", "zh", "en", "yue", "ja", "ko"],
                             value="yue",
@@ -1249,7 +1580,7 @@ def create_unified_interface():
                 
                 stt_process_btn.click(
                     fn=process_batch_transcription,
-                    inputs=[stt_audio_files, stt_zip_file, stt_language_dropdown],
+                    inputs=[stt_audio_files, stt_zip_file, stt_link_or_path, stt_language_dropdown],
                     outputs=[gr.File(visible=False), gr.File(visible=False), stt_zip_download, stt_status_output, stt_conversation_output]
                 )
             
@@ -1353,7 +1684,7 @@ def create_unified_interface():
                             type="filepath",
                             sources=["upload"]
                         )
-                        sep_process_btn = gr.Button("🎵 Separate Speakers", variant="primary", size="lg")
+                        sep_process_btn = gr.Button("Separate Speakers", variant="primary", size="lg")
                         
                         gr.Markdown("""
                         #### How it works:
@@ -1624,24 +1955,6 @@ def create_unified_interface():
                     ],
                     outputs=comp_outputs,
                 )
-        
-        gr.Markdown(
-            """
-            ---
-            ### 💡 Workflow Tips:
-            1. **Audio Enhancement**: Clean up poor quality recordings before processing
-            2. **Diarization**: Upload a phone call recording to identify speakers
-            3. **Audio Chopper**: Use the RTTM output to split the audio by speaker
-            4. **Transcription**: Convert the chopped segments to text
-            5. **LLM Analysis**: Analyze the conversation for insights
-            6. **Speaker Separation**: Create separate audio files for each speaker (with others silenced)
-            
-            ### 🎯 Recommended Workflow for Poor Quality Recordings:
-            1. Start with **Audio Enhancement** to improve quality
-            2. Use enhanced audio in **Diarization** for better speaker detection
-            3. Continue with other tools as needed
-            """
-        )
     
     return demo
 
