@@ -520,6 +520,67 @@ DEFAULT_SYSTEM_MESSAGE = (
 )
 
 
+def parse_metadata(metadata_text: str) -> dict[str, str]:
+    """
+    Parse metadata from pasted text format.
+    
+    Expected format:
+        Broker Name: Dickson Lau
+        Broker Id: 0489
+        Client Number: 97501167
+        Client Name: CHAN CHO WING and CHAN MAN LEE
+        Client Id: P77751
+        UTC: 2025-10-10T01:45:10
+        HKT: 2025-10-10T09:45:10
+    
+    Returns:
+        dict: Dictionary with keys: broker_name, broker_id, client_number, 
+              client_id, client_name, utc_time, hkt_time
+    """
+    result = {
+        "broker_name": "",
+        "broker_id": "",
+        "client_number": "",
+        "client_id": "",
+        "client_name": "",
+        "utc_time": "",
+        "hkt_time": ""
+    }
+    
+    if not metadata_text or not metadata_text.strip():
+        return result
+    
+    # Parse line by line
+    lines = metadata_text.strip().split('\n')
+    for line in lines:
+        line = line.strip()
+        if ':' not in line:
+            continue
+            
+        # Split only on first colon to handle values that contain colons (like times)
+        key, value = line.split(':', 1)
+        key = key.strip().lower()
+        value = value.strip()
+        
+        # Map the keys to result dictionary
+        if 'broker name' in key:
+            result['broker_name'] = value
+        elif 'broker id' in key:
+            result['broker_id'] = value
+        elif 'client number' in key:
+            result['client_number'] = value
+        elif 'client id' in key:
+            result['client_id'] = value
+        elif 'client name' in key:
+            result['client_name'] = value
+        elif key == 'utc':
+            result['utc_time'] = value
+        elif key == 'hkt':
+            result['hkt_time'] = value
+    
+    return result
+
+
 def analyze_with_llm(
     prompt_text: str,
     prompt_file,
@@ -527,6 +588,7 @@ def analyze_with_llm(
     ollama_url: str,
     system_message: str,
     temperature: float,
+    metadata_text: str = "",
 ) -> tuple[str, str]:
     """
     Analyze text with LLM
@@ -560,6 +622,34 @@ def analyze_with_llm(
         if not ollama_url or not ollama_url.strip():
             return "❌ Error: Please specify Ollama URL", ""
         
+        # Parse metadata from the pasted text
+        metadata_dict = parse_metadata(metadata_text)
+        
+        # Build metadata context if any fields are provided
+        metadata_lines = []
+        if metadata_dict['broker_name']:
+            metadata_lines.append(f"Broker Name: {metadata_dict['broker_name']}")
+        if metadata_dict['broker_id']:
+            metadata_lines.append(f"Broker Id: {metadata_dict['broker_id']}")
+        if metadata_dict['client_number']:
+            metadata_lines.append(f"Client Number: {metadata_dict['client_number']}")
+        if metadata_dict['client_name']:
+            metadata_lines.append(f"Client Name: {metadata_dict['client_name']}")
+        if metadata_dict['client_id']:
+            metadata_lines.append(f"Client Id: {metadata_dict['client_id']}")
+        if metadata_dict['utc_time']:
+            metadata_lines.append(f"UTC: {metadata_dict['utc_time']}")
+        if metadata_dict['hkt_time']:
+            metadata_lines.append(f"HKT: {metadata_dict['hkt_time']}")
+        
+        # Prepend metadata to system message if available
+        final_system_message = system_message
+        if metadata_lines:
+            metadata_context = "\n".join(metadata_lines)
+            final_system_message = f"{system_message}\n\n以下是對話的資料背景, 可能會幫助你分析對話:\n{metadata_context}"
+        
+        print(f"{'*' * 30} final_system_message: {final_system_message} {'*' * 30}")
+        
         # Initialize the LLM
         status += f"\n✓ Connecting to Ollama at: {ollama_url}"
         status += f"\n✓ Using model: {model}"
@@ -573,7 +663,7 @@ def analyze_with_llm(
         
         # Prepare messages
         messages = [
-            ("system", system_message),
+            ("system", final_system_message),
             ("human", final_prompt),
         ]
         
@@ -1277,16 +1367,16 @@ def parse_filename_metadata(filename: str, csv_path: str = "client.csv") -> str:
             client_id = "client.csv not found"
         
         # Format output as JSON
-        result_dict = {
-            "broker_name": broker_name,
-            "broker_id": broker_id,
-            "client_number": client_number,
-            "client_name": client_name,
-            "client_id": client_id,
-            "utc": utc_formatted,
-            "hkt": hkt_formatted
-        }
-        output = json.dumps(result_dict, indent=2, ensure_ascii=False)
+        # result_dict = {
+        #     "broker_name": broker_name,
+        #     "broker_id": broker_id,
+        #     "client_number": client_number,
+        #     "client_name": client_name,
+        #     "client_id": client_id,
+        #     "utc": utc_formatted,
+        #     "hkt": hkt_formatted
+        # }
+        # output = json.dumps(result_dict, indent=2, ensure_ascii=False)
         
         # Format output
         output = f"""
@@ -1297,8 +1387,6 @@ Client Name: {client_name}
 Client Id: {client_id}
 UTC: {utc_formatted}
 HKT: {hkt_formatted}
-
-{result_dict}
 """
         
         return output
@@ -1609,6 +1697,16 @@ def create_unified_interface():
                             )
                             gr.Markdown("*上傳文件將優先於文本輸入*")
                         
+                        gr.Markdown("#### Context Information (Metadata)")
+                        gr.Markdown("*This information will be included in the system prompt*")
+                        
+                        llm_metadata_textbox = gr.Textbox(
+                            label="Paste Context Information",
+                            placeholder="""""",
+                            lines=8,
+                            info="Paste all context information at once in the format shown above"
+                        )
+                        
                         gr.Markdown("#### LLM Settings")
                         
                         with gr.Row():
@@ -1664,6 +1762,7 @@ def create_unified_interface():
                         llm_ollama_url,
                         llm_system_message,
                         llm_temperature_slider,
+                        llm_metadata_textbox,
                     ],
                     # outputs=[llm_status_box, llm_response_box],
                     outputs=[llm_response_box],
