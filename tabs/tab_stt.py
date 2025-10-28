@@ -17,6 +17,7 @@ import gradio as gr
 
 from funasr import AutoModel
 from batch_stt import format_str_v3, load_audio
+from audio_chopper import chop_audio_file, read_rttm_file
 
 # Import for WSYue-ASR model
 from transformers import WhisperProcessor, WhisperForConditionalGeneration
@@ -194,6 +195,230 @@ def transcribe_single_audio_wsyue(audio_path):
     except Exception as e:
         print(f"Error transcribing with WSYue {audio_path}: {e}")
         return None
+
+
+def process_chop_and_transcribe(audio_file, rttm_text, language, use_sensevoice, use_wsyue, padding_ms=100, progress=gr.Progress()):
+    """
+    Integrated pipeline: Chop audio based on RTTM, then transcribe the segments.
+    
+    Args:
+        audio_file: Audio file from Gradio interface
+        rttm_text: RTTM text string pasted by user
+        language: Language code for transcription
+        use_sensevoice: Whether to use SenseVoiceSmall model
+        use_wsyue: Whether to use WSYue-ASR model
+        padding_ms: Padding in milliseconds for chopping (default: 100)
+    
+    Returns:
+        tuple: (json_file, sensevoice_txt, wsyue_txt, zip_file, sensevoice_conversation, wsyue_conversation, status_message)
+    """
+    if audio_file is None:
+        return None, None, None, None, "", "", "❌ No audio file uploaded"
+    
+    if not rttm_text or not rttm_text.strip():
+        return None, None, None, None, "", "", "❌ No RTTM text provided"
+    
+    if not use_sensevoice and not use_wsyue:
+        return None, None, None, None, "", "", "⚠️ Please select at least one model"
+    
+    try:
+        # Create a temporary output directory
+        temp_out_dir = tempfile.mkdtemp(prefix="chop_transcribe_")
+        chopped_audio_dir = os.path.join(temp_out_dir, "chopped_segments")
+        os.makedirs(chopped_audio_dir, exist_ok=True)
+        
+        status = f"🔄 Starting integrated pipeline (Chop + Transcribe)...\n\n"
+        status += f"📁 Audio file: {os.path.basename(audio_file)}\n"
+        status += f"⏱️ Padding: {padding_ms} ms\n\n"
+        
+        # Step 1: Save RTTM text to a temporary file
+        progress(0, desc="Preparing RTTM...")
+        temp_rttm_file = os.path.join(temp_out_dir, "temp_rttm.rttm")
+        with open(temp_rttm_file, 'w', encoding='utf-8') as f:
+            f.write(rttm_text.strip())
+        status += "✅ RTTM text saved\n"
+        
+        # Step 2: Read RTTM segments
+        progress(0.05, desc="Reading RTTM...")
+        status += "📖 Reading RTTM data...\n"
+        segments = read_rttm_file(temp_rttm_file)
+        
+        if not segments:
+            return None, None, None, None, "", "", "❌ No segments found in RTTM text!"
+        
+        status += f"✅ Found {len(segments)} segments\n\n"
+        
+        # Count speakers
+        speakers = set(seg['speaker'] for seg in segments)
+        status += f"👥 Detected speakers: {len(speakers)} ({', '.join(sorted(speakers))})\n\n"
+        
+        # Step 3: Chop audio file
+        progress(0.1, desc="Chopping audio...")
+        status += "✂️ Chopping audio into segments...\n"
+        chop_audio_file(audio_file, segments, chopped_audio_dir, padding_ms)
+        
+        # Get list of chopped files
+        chopped_files = sorted([
+            os.path.join(chopped_audio_dir, f) 
+            for f in os.listdir(chopped_audio_dir) 
+            if f.endswith('.wav')
+        ])
+        
+        status += f"✅ Audio chopped into {len(chopped_files)} segments\n\n"
+        
+        # Step 4: Initialize models
+        progress(0.2, desc="Loading models...")
+        if use_sensevoice:
+            sensevoice_status = initialize_sensevoice_model()
+            status += sensevoice_status + "\n"
+        if use_wsyue:
+            wsyue_status = initialize_wsyue_model()
+            status += wsyue_status + "\n"
+        status += "\n"
+        
+        if use_sensevoice and sensevoice_model is None:
+            return None, None, None, None, "", "", status + "❌ Failed to load SenseVoiceSmall model"
+        if use_wsyue and wsyue_model is None:
+            return None, None, None, None, "", "", status + "❌ Failed to load WSYue-ASR model"
+        
+        # Step 5: Transcribe chopped segments
+        status += f"📝 Transcribing {len(chopped_files)} segment(s)...\n\n"
+        start_time = time.time()
+        
+        sensevoice_results = []
+        wsyue_results = []
+        total_files = len(chopped_files)
+        
+        # Process all files with SenseVoice first
+        if use_sensevoice:
+            status += f"🎙️ Processing with SenseVoiceSmall...\n\n"
+            for i, audio_path in enumerate(chopped_files):
+                progress((0.2 + 0.35 * (i / total_files)), desc=f"SenseVoice {i+1}/{total_files}...")
+                
+                filename = os.path.basename(audio_path)
+                status += f"[{i+1}/{total_files}] {filename}\n"
+                
+                result = transcribe_single_audio_sensevoice(audio_path, language)
+                if result:
+                    sensevoice_results.append(result)
+                    status += f"  ✅ SenseVoice: {result['transcription'][:80]}{'...' if len(result['transcription']) > 80 else ''}\n"
+                else:
+                    status += f"  ❌ SenseVoice: Failed\n"
+                
+                status += "\n"
+            
+            status += f"✅ SenseVoice completed: {len(sensevoice_results)}/{total_files} files\n\n"
+        
+        # Then process all files with WSYue
+        if use_wsyue:
+            status += f"🎙️ Processing with WSYue-ASR...\n\n"
+            for i, audio_path in enumerate(chopped_files):
+                progress((0.55 + 0.35 * (i / total_files)), desc=f"WSYue {i+1}/{total_files}...")
+                
+                filename = os.path.basename(audio_path)
+                status += f"[{i+1}/{total_files}] {filename}\n"
+                
+                result = transcribe_single_audio_wsyue(audio_path)
+                if result:
+                    wsyue_results.append(result)
+                    status += f"  ✅ WSYue: {result['transcription'][:80]}{'...' if len(result['transcription']) > 80 else ''}\n"
+                else:
+                    status += f"  ❌ WSYue: Failed\n"
+                
+                status += "\n"
+            
+            status += f"✅ WSYue completed: {len(wsyue_results)}/{total_files} files\n\n"
+        
+        end_time = time.time()
+        processing_time = end_time - start_time
+        
+        progress(0.9, desc="Saving results...")
+        
+        # Helper function to format speaker name
+        def get_speaker_name(fname):
+            m = re.search(r"speaker_(\d+)", fname)
+            if m:
+                return f"speaker_{m.group(1)}"
+            return Path(fname).stem if fname else 'unknown'
+        
+        # Save results to JSON files
+        results_data = {
+            "sensevoice": sensevoice_results if use_sensevoice else [],
+            "wsyue": wsyue_results if use_wsyue else []
+        }
+        json_path = os.path.join(temp_out_dir, "transcriptions.json")
+        with open(json_path, 'w', encoding='utf-8') as f:
+            json.dump(results_data, f, ensure_ascii=False, indent=2)
+        
+        # Save SenseVoice conversation.txt
+        sensevoice_txt_path = None
+        sensevoice_conversation_content = ""
+        if use_sensevoice and sensevoice_results:
+            sensevoice_txt_path = os.path.join(temp_out_dir, "conversation_sensevoice.txt")
+            with open(sensevoice_txt_path, 'w', encoding='utf-8') as f:
+                for r in sensevoice_results:
+                    fname = r.get('file', '')
+                    speaker = get_speaker_name(fname)
+                    f.write(f"{speaker}: {r.get('transcription', '')}\n")
+            
+            with open(sensevoice_txt_path, 'r', encoding='utf-8') as f:
+                sensevoice_conversation_content = f.read()
+        
+        # Save WSYue conversation.txt
+        wsyue_txt_path = None
+        wsyue_conversation_content = ""
+        if use_wsyue and wsyue_results:
+            wsyue_txt_path = os.path.join(temp_out_dir, "conversation_wsyue.txt")
+            with open(wsyue_txt_path, 'w', encoding='utf-8') as f:
+                for r in wsyue_results:
+                    fname = r.get('file', '')
+                    speaker = get_speaker_name(fname)
+                    f.write(f"{speaker}: {r.get('transcription', '')}\n")
+            
+            with open(wsyue_txt_path, 'r', encoding='utf-8') as f:
+                wsyue_conversation_content = f.read()
+        
+        # Create a zip file with all results
+        zip_path = os.path.join(temp_out_dir, "transcription_results.zip")
+        with zipfile.ZipFile(zip_path, 'w') as zipf:
+            zipf.write(json_path, arcname="transcriptions.json")
+            if sensevoice_txt_path:
+                zipf.write(sensevoice_txt_path, arcname="conversation_sensevoice.txt")
+            if wsyue_txt_path:
+                zipf.write(wsyue_txt_path, arcname="conversation_wsyue.txt")
+        
+        # Step 6: Clean up temporary chopped files
+        progress(0.95, desc="Cleaning up...")
+        try:
+            shutil.rmtree(chopped_audio_dir)
+            status += "🧹 Temporary chopped files cleaned up\n\n"
+        except Exception as e:
+            status += f"⚠️ Warning: Could not clean up temp files: {str(e)}\n\n"
+        
+        progress(1.0, desc="Complete!")
+        
+        status += f"\n{'='*60}\n"
+        status += f"✅ Pipeline completed successfully!\n"
+        status += f"⏱️ Processing time: {processing_time:.2f} seconds ({processing_time/60:.2f} minutes)\n"
+        if use_sensevoice:
+            status += f"📊 SenseVoice processed: {len(sensevoice_results)}/{total_files} segments\n"
+        if use_wsyue:
+            status += f"📊 WSYue processed: {len(wsyue_results)}/{total_files} segments\n"
+        status += f"📁 Results saved to:\n"
+        status += f"   • transcriptions.json\n"
+        if sensevoice_txt_path:
+            status += f"   • conversation_sensevoice.txt\n"
+        if wsyue_txt_path:
+            status += f"   • conversation_wsyue.txt\n"
+        status += f"   • transcription_results.zip\n"
+        status += f"{'='*60}\n"
+        
+        return json_path, sensevoice_txt_path, wsyue_txt_path, zip_path, sensevoice_conversation_content, wsyue_conversation_content, status
+        
+    except Exception as e:
+        error_msg = f"❌ Error during pipeline: {str(e)}"
+        error_msg += f"\n\n{traceback.format_exc()}"
+        return None, None, None, None, "", "", error_msg
 
 
 def process_batch_transcription(audio_files, zip_file, link_or_path, language, use_sensevoice, use_wsyue, progress=gr.Progress()):
@@ -490,39 +715,27 @@ def process_batch_transcription(audio_files, zip_file, link_or_path, language, u
 
 
 def create_stt_tab():
-    """Create and return the Batch Speech-to-Text tab"""
-    with gr.Tab("3️⃣ Batch Speech-to-Text"):
-        gr.Markdown("### Transcribe multiple audio segments to text")
+    """Create and return the Batch Speech-to-Text tab (with integrated chopping)"""
+    with gr.Tab("3️⃣ Chop & Transcribe"):
+        gr.Markdown("### Chop audio by RTTM and transcribe segments")
+        gr.Markdown("*Upload an audio file and paste RTTM text to automatically chop and transcribe*")
         
         with gr.Row():
             with gr.Column(scale=1):
-                gr.Markdown("#### Input (Choose one or both methods)")
+                gr.Markdown("#### Input")
                 
-                with gr.Tab("🔗 Paste Link or Folder Path"):
-                    stt_link_or_path = gr.Textbox(
-                        label="Zip File URL or Folder Path",
-                        placeholder="Paste a URL to a zip file (e.g., https://example.com/audio.zip)\nor a local folder path (e.g., C:/Users/me/audio_files)",
-                        lines=2,
-                        max_lines=3
-                    )
-                    gr.Markdown("*Provide either a direct URL to a zip file or a local folder path containing audio files*")
+                stt_audio_input = gr.Audio(
+                    label="Audio File",
+                    type="filepath",
+                    sources=["upload"]
+                )
                 
-                with gr.Tab("📁 Upload Audio Files"):
-                    stt_audio_files = gr.File(
-                        label="Upload Audio Files",
-                        file_count="multiple",
-                        file_types=[".wav", ".mp3", ".flac", ".m4a"],
-                        type="filepath"
-                    )
-                    
-                with gr.Tab("📦 Upload Zip File"):
-                    stt_zip_file = gr.File(
-                        label="Upload Zip File Containing Audio Files",
-                        file_count="single",
-                        file_types=[".zip"],
-                        type="filepath"
-                    )
-                    gr.Markdown("*The zip file should contain audio files (.wav, .mp3, .flac, .m4a, .ogg, .opus)*")
+                stt_rttm_text = gr.Textbox(
+                    label="RTTM Content",
+                    placeholder="Paste RTTM content here...\n\nExample:\nSPEAKER test 1 0.000 2.500 <NA> <NA> speaker_0 <NA> <NA>\nSPEAKER test 1 2.500 3.200 <NA> <NA> speaker_1 <NA> <NA>",
+                    lines=8,
+                    max_lines=15
+                )
                 
                 gr.Markdown("#### Model Selection")
                 with gr.Row():
@@ -543,18 +756,28 @@ def create_stt_tab():
                     label="Language (for SenseVoice)",
                     info="Select the language of the audio"
                 )
-                stt_process_btn = gr.Button("🚀 Start Transcription", variant="primary", size="lg")
+                
+                stt_process_btn = gr.Button("✂️🎙️ Chop & Transcribe", variant="primary", size="lg")
                 
             with gr.Column(scale=2):
-                gr.Markdown("#### Results")
+                gr.Markdown("#### Processing Status")
+                stt_status_output = gr.Textbox(
+                    label="Status Log",
+                    lines=8,
+                    max_lines=15,
+                    interactive=False,
+                    show_copy_button=True
+                )
+                
+                gr.Markdown("#### Transcription Results")
                 
                 with gr.Row():
                     with gr.Column(scale=1):
                         gr.Markdown("##### 📝 SenseVoiceSmall")
                         stt_sensevoice_output = gr.Textbox(
                             label="SenseVoiceSmall Transcription",
-                            lines=20,
-                            max_lines=30,
+                            lines=15,
+                            max_lines=25,
                             interactive=False,
                             show_copy_button=True,
                             placeholder="SenseVoiceSmall results will appear here..."
@@ -564,8 +787,8 @@ def create_stt_tab():
                         gr.Markdown("##### 📝 WSYue-ASR (Whisper Cantonese)")
                         stt_wsyue_output = gr.Textbox(
                             label="WSYue-ASR Transcription",
-                            lines=20,
-                            max_lines=30,
+                            lines=15,
+                            max_lines=25,
                             interactive=False,
                             show_copy_button=True,
                             placeholder="WSYue-ASR results will appear here..."
@@ -577,8 +800,8 @@ def create_stt_tab():
                 )
         
         stt_process_btn.click(
-            fn=process_batch_transcription,
-            inputs=[stt_audio_files, stt_zip_file, stt_link_or_path, stt_language_dropdown, stt_use_sensevoice, stt_use_wsyue],
-            outputs=[gr.File(visible=False), gr.File(visible=False), gr.File(visible=False), stt_zip_download, stt_sensevoice_output, stt_wsyue_output]
+            fn=process_chop_and_transcribe,
+            inputs=[stt_audio_input, stt_rttm_text, stt_language_dropdown, stt_use_sensevoice, stt_use_wsyue],
+            outputs=[gr.File(visible=False), gr.File(visible=False), gr.File(visible=False), stt_zip_download, stt_sensevoice_output, stt_wsyue_output, stt_status_output]
         )
 
