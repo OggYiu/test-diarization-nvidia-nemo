@@ -4,48 +4,47 @@ Identify and separate speakers in audio files
 """
 
 import os
-import csv
 import time
 import tempfile
 from datetime import datetime
 import gradio as gr
 
 from diarization import diarize_audio
+from mongodb_utils import load_from_mongodb, save_to_mongodb
 
 
-# CSV file to cache diarization results
-DIARIZATION_CSV = "diarization.csv"
+# MongoDB collection name for diarization results
+COLLECTION_NAME = "diarization_results"
 
 
 def load_diarization_cache():
     """
-    Load cached diarization results from CSV file.
+    Load cached diarization results from MongoDB.
     
     Returns:
         dict: Dictionary mapping filename to cached results
     """
     cache = {}
-    if os.path.exists(DIARIZATION_CSV):
-        try:
-            with open(DIARIZATION_CSV, 'r', encoding='utf-8', newline='') as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    cache[row['filename']] = {
-                        'rttm_content': row['rttm_content'],
-                        'processing_time': float(row['processing_time']),
-                        'num_segments': int(row['num_segments']),
-                        'num_speakers': int(row['num_speakers']),
-                        'speaker_ids': row['speaker_ids'],
-                        'timestamp': row['timestamp']
-                    }
-        except Exception as e:
-            print(f"Warning: Could not load diarization cache: {e}")
+    
+    # Load all documents from MongoDB
+    documents = load_from_mongodb(COLLECTION_NAME)
+    
+    for doc in documents:
+        cache[doc['filename']] = {
+            'rttm_content': doc['rttm_content'],
+            'processing_time': float(doc['processing_time']),
+            'num_segments': int(doc['num_segments']),
+            'num_speakers': int(doc['num_speakers']),
+            'speaker_ids': doc['speaker_ids'],
+            'timestamp': doc['timestamp']
+        }
+    
     return cache
 
 
 def save_diarization_to_cache(filename, rttm_content, processing_time, num_segments, num_speakers, speaker_ids):
     """
-    Save diarization result to CSV cache.
+    Save diarization result to MongoDB cache.
     
     Args:
         filename: Name of the audio file
@@ -55,31 +54,19 @@ def save_diarization_to_cache(filename, rttm_content, processing_time, num_segme
         num_speakers: Number of speakers detected
         speaker_ids: Comma-separated speaker IDs
     """
-    # Check if file exists to determine if we need to write headers
-    file_exists = os.path.exists(DIARIZATION_CSV)
+    # Prepare document
+    document = {
+        'filename': filename,
+        'rttm_content': rttm_content,
+        'processing_time': processing_time,
+        'num_segments': num_segments,
+        'num_speakers': num_speakers,
+        'speaker_ids': speaker_ids,
+        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    }
     
-    try:
-        with open(DIARIZATION_CSV, 'a', encoding='utf-8', newline='') as f:
-            fieldnames = ['filename', 'rttm_content', 'processing_time', 'num_segments', 
-                         'num_speakers', 'speaker_ids', 'timestamp']
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            
-            # Write header if file is new
-            if not file_exists:
-                writer.writeheader()
-            
-            # Write the data
-            writer.writerow({
-                'filename': filename,
-                'rttm_content': rttm_content,
-                'processing_time': processing_time,
-                'num_segments': num_segments,
-                'num_speakers': num_speakers,
-                'speaker_ids': speaker_ids,
-                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            })
-    except Exception as e:
-        print(f"Warning: Could not save to diarization cache: {e}")
+    # Save to MongoDB with upsert on filename
+    save_to_mongodb(COLLECTION_NAME, document, unique_key='filename')
 
 
 def process_audio(audio_file, overwrite=False):
@@ -106,9 +93,9 @@ def process_audio(audio_file, overwrite=False):
             cached = cache[filename]
             
             # Create status message from cached data
-            status = f"💾 Loading cached results for: {filename}\n"
+            status = f"💾 Loading cached results from MongoDB for: {filename}\n"
             status += f"📅 Previously processed: {cached['timestamp']}\n\n"
-            status += "✅ Results loaded from cache!"
+            status += "✅ Results loaded from MongoDB cache!"
             
             summary = f"📈 Summary:\n"
             summary += f"  • Total segments: {cached['num_segments']}\n"
@@ -162,7 +149,7 @@ def process_audio(audio_file, overwrite=False):
         summary += f"  • Detected speakers: {len(speakers)}\n"
         summary += f"  • Speaker IDs: {speaker_ids_str}\n"
         summary += f"  • Processing time: {processing_time:.2f} seconds ({processing_time/60:.2f} minutes)\n"
-        summary += f"  • 💾 Results saved to cache for future use\n\n"
+        summary += f"  • 💾 Results saved to MongoDB for future use\n\n"
         
         # Save to cache
         save_diarization_to_cache(
@@ -197,7 +184,7 @@ def create_diarization_tab():
                 diar_overwrite_checkbox = gr.Checkbox(
                     label="🔄 Overwrite existing cached RTTM data",
                     value=False,
-                    info="If checked, will reprocess the file even if cached results exist"
+                    info="If checked, will reprocess the file even if MongoDB cached results exist"
                 )
                 diar_process_btn = gr.Button("🚀 Start Diarization", variant="primary", size="lg")
                 

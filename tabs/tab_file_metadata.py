@@ -10,8 +10,14 @@ import traceback
 from datetime import datetime, timedelta
 import gradio as gr
 
+from mongodb_utils import save_to_mongodb, find_one_from_mongodb
 
-def parse_filename_metadata(filename: str, csv_path: str = "client.csv") -> str:
+
+# MongoDB collection name for file metadata
+METADATA_COLLECTION = "file_metadata"
+
+
+def parse_filename_metadata(filename: str, csv_path: str = "client.csv") -> dict:
     """
     Parse audio filename to extract metadata and format output.
     
@@ -25,7 +31,8 @@ def parse_filename_metadata(filename: str, csv_path: str = "client.csv") -> str:
         csv_path: Path to client.csv file for name lookup
         
     Returns:
-        Formatted string with extracted metadata
+        dict: Dictionary with 'status' (success/error), 'formatted_output' (display string), 
+              and 'data' (structured metadata dict)
     """
     try:
         # Remove extension
@@ -43,18 +50,22 @@ def parse_filename_metadata(filename: str, csv_path: str = "client.csv") -> str:
             match = re.match(pattern2, base_name)
         
         if not match:
-            return f"""
-            ❌ Error: Filename does not match expected pattern.
-            
-            Expected format:
-            [Broker Name ID]_8330-97501167_20251010014510(20981).wav
-            
-            Received:
-            {filename}
-            
-            Note: The filename may have been sanitized by the system. 
-            Please ensure special characters are preserved or manually enter the correct format.
-            """
+            error_msg = f"""❌ Error: Filename does not match expected pattern.
+
+Expected format:
+[Broker Name ID]_8330-97501167_20251010014510(20981).wav
+
+Received:
+{filename}
+
+Note: The filename may have been sanitized by the system. 
+Please ensure special characters are preserved or manually enter the correct format.
+"""
+            return {
+                'status': 'error',
+                'formatted_output': error_msg,
+                'data': None
+            }
         
         broker_info = match.group(1)  # e.g., "Dickson Lau 0489" or "Dickson Lau"
         # unknown_1 = match.group(2)     # e.g., "8330"
@@ -80,7 +91,12 @@ def parse_filename_metadata(filename: str, csv_path: str = "client.csv") -> str:
             utc_formatted = utc_dt.strftime("%Y-%m-%dT%H:%M:%S")
             hkt_formatted = hkt_dt.strftime("%Y-%m-%dT%H:%M:%S")
         except ValueError as e:
-            return f"❌ Error parsing datetime: {str(e)}"
+            error_msg = f"❌ Error parsing datetime: {str(e)}"
+            return {
+                'status': 'error',
+                'formatted_output': error_msg,
+                'data': None
+            }
         
         # Look up client name and ID in CSV
         client_name = "Not found"
@@ -119,8 +135,9 @@ def parse_filename_metadata(filename: str, csv_path: str = "client.csv") -> str:
             client_name = "client.csv not found"
             client_id = "client.csv not found"
         
-        # Format output
-        output = f"""
+        # Format output for display
+        formatted_output = f"""✅ Metadata extracted successfully
+
 Broker Name: {broker_name}
 Broker Id: {broker_id}
 Client Number: {client_number}
@@ -128,18 +145,44 @@ Client Name: {client_name}
 Client Id: {client_id}
 UTC: {utc_formatted}
 HKT: {hkt_formatted}
+
+💾 Saved to MongoDB
 """
         
-        return output
+        # Prepare structured data
+        metadata_dict = {
+            'filename': filename,
+            'broker_name': broker_name,
+            'broker_id': broker_id,
+            'client_number': client_number,
+            'client_name': client_name,
+            'client_id': client_id,
+            'utc_datetime': utc_formatted,
+            'hkt_datetime': hkt_formatted,
+            'utc_datetime_obj': utc_dt,
+            'hkt_datetime_obj': hkt_dt,
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
+        
+        return {
+            'status': 'success',
+            'formatted_output': formatted_output,
+            'data': metadata_dict
+        }
         
     except Exception as e:
         error_msg = f"❌ Error parsing filename: {str(e)}\n\n{traceback.format_exc()}"
-        return error_msg
+        return {
+            'status': 'error',
+            'formatted_output': error_msg,
+            'data': None
+        }
 
 
 def process_file_metadata(audio_file):
     """
     Process uploaded audio file and extract metadata from filename.
+    Also saves the metadata to MongoDB.
     
     Args:
         audio_file: Audio file from Gradio interface
@@ -157,7 +200,12 @@ def process_file_metadata(audio_file):
         # Parse metadata
         result = parse_filename_metadata(filename)
         
-        return result
+        # If parsing was successful, save to MongoDB
+        if result['status'] == 'success' and result['data']:
+            save_to_mongodb(METADATA_COLLECTION, result['data'], unique_key='filename')
+        
+        # Return the formatted output string for display
+        return result['formatted_output']
         
     except Exception as e:
         error_msg = f"❌ Error: {str(e)}\n\n{traceback.format_exc()}"
