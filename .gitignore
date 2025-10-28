@@ -106,10 +106,7 @@ coverage.xml
 *.gz
 
 # Output and temporary folders
-demo/output/
-demo/phone_recordings/
-demo/speaker_separated/
-demo/transcriptions/
+demo/
 output/
 output_*/
 test_output/
@@ -141,5 +138,7 @@ Thumbs.db
 # 2. Adding a pre-commit hook to check file sizes
 # 3. Running: git config --local core.bigFileThreshold 50m
 
-/NeMo/
-/model_cache/
+NeMo/
+model_cache/
+.venv/
+tabs/__pycache__/
