@@ -142,3 +142,4 @@ Thumbs.db
 # 3. Running: git config --local core.bigFileThreshold 50m
 
 /NeMo/
+/model_cache/
