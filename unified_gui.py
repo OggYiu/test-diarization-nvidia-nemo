@@ -7,6 +7,8 @@ Unified Gradio GUI combining all phone call analysis tools:
 5. Audio Enhancement
 6. LLM Comparison
 7. File Metadata
+8. Multi-LLM Query
+9. STT Stock Comparison
 
 Modular version - each tab is in a separate file in the tabs/ directory
 """
@@ -23,6 +25,7 @@ from tabs import (
     create_audio_enhancement_tab,
     create_llm_comparison_tab,
     create_multi_llm_tab,
+    create_stt_stock_comparison_tab,
 )
 
 
@@ -47,6 +50,7 @@ def create_unified_interface():
             create_audio_enhancement_tab()
             create_llm_comparison_tab()
             create_multi_llm_tab()
+            create_stt_stock_comparison_tab()
     
     return demo
 

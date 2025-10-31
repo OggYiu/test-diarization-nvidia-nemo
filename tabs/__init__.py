@@ -11,6 +11,7 @@ from .tab_speaker_separation import create_speaker_separation_tab
 from .tab_audio_enhancement import create_audio_enhancement_tab
 from .tab_llm_comparison import create_llm_comparison_tab
 from .tab_multi_llm import create_multi_llm_tab
+from .tab_stt_stock_comparison import create_stt_stock_comparison_tab
 
 __all__ = [
     'create_file_metadata_tab',
@@ -21,5 +22,6 @@ __all__ = [
     'create_audio_enhancement_tab',
     'create_llm_comparison_tab',
     'create_multi_llm_tab',
+    'create_stt_stock_comparison_tab',
 ]
 

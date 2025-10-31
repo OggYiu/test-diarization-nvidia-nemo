@@ -64,7 +64,7 @@ def get_device_info():
 
 # Get device once at module load
 DEVICE, DEVICE_NAME, DEVICE_INFO = get_device_info()
-DEVICE = "cpu"
+# DEVICE = "cpu"
 
 def load_diarization_cache():
     """
