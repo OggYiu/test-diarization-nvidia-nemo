@@ -69,7 +69,7 @@ def save_diarization_to_cache(filename, rttm_content, processing_time, num_segme
     save_to_mongodb(COLLECTION_NAME, document, unique_key='filename')
 
 
-def process_audio(audio_file, overwrite=False):
+def process_audio(audio_file, overwrite=False, domain_type="meeting"):
     """
     Process audio file through diarization and return results.
     Checks cache first to avoid reprocessing.
@@ -77,6 +77,7 @@ def process_audio(audio_file, overwrite=False):
     Args:
         audio_file: Audio file from Gradio interface
         overwrite: If True, reprocess even if cached results exist
+        domain_type: Type of audio domain ('meeting' or 'telephonic')
     
     Returns:
         tuple: (rttm_content, status_message, output_directory_path)
@@ -123,7 +124,8 @@ def process_audio(audio_file, overwrite=False):
         rttm_content = diarize_audio(
             audio_filepath=audio_file,
             out_dir=temp_out_dir,
-            num_speakers=2
+            num_speakers=2,
+            domain_type=domain_type
         )
         end_time = time.time()
         
@@ -181,6 +183,12 @@ def create_diarization_tab():
                     type="filepath",
                     sources=["upload"]
                 )
+                diar_domain_type = gr.Radio(
+                    choices=["meeting", "telephonic"],
+                    value="meeting",
+                    label="🎯 Domain Type",
+                    info="Select 'meeting' for general audio or 'telephonic' for phone calls"
+                )
                 diar_overwrite_checkbox = gr.Checkbox(
                     label="🔄 Overwrite existing cached RTTM data",
                     value=False,
@@ -211,7 +219,7 @@ def create_diarization_tab():
         
         diar_process_btn.click(
             fn=process_audio,
-            inputs=[diar_audio_input, diar_overwrite_checkbox],
+            inputs=[diar_audio_input, diar_overwrite_checkbox, diar_domain_type],
             outputs=[diar_rttm_output, diar_status_output, diar_output_dir]
         )
 

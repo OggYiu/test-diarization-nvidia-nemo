@@ -1,12 +1,25 @@
 # Requirements for unified_gui.py
 # Phone Call Analysis Suite - Unified GUI
 
-# Core UI Framework
-gradio>=4.0.0
+# NVIDIA NeMo with ASR support for speaker diarization
+nemo_toolkit[asr]>=2.0.0,<3.0.0
 
-# Deep Learning & Audio Processing
-torch>=2.0.0
+# Core ML framework dependencies
+torch>=2.0.0,<3.0.0
 torchaudio>=2.0.0
+pytorch-lightning>=2.0.0,<3.0.0
+numpy>=1.21.0,<2.0.0
+
+# Configuration management
+omegaconf>=2.3.0
+hydra-core>=1.3.0,<2.0.0
+
+# Audio processing
+librosa>=0.10.0,<1.0.0
+soundfile>=0.12.0
+
+# Additional dependencies for NeMo
+webdataset>=0.2.0
 
 # Speech Recognition & ASR
 funasr>=1.0.0
@@ -18,11 +31,11 @@ langchain-core>=0.1.0
 # Data Validation
 pydantic>=2.0.0
 
-# Audio File I/O
-soundfile>=0.12.0
-
 # Database
 pymongo>=4.0.0
+
+# Core UI Framework
+gradio>=4.0.0
 
 # Note: This script also imports from local modules:
 # - diarization.py

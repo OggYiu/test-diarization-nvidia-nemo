@@ -4,11 +4,8 @@ import tempfile
 import argparse
 import shutil
 import platform
-import wget  # For downloading sample audio if needed
-import numpy as np
-import librosa
-import matplotlib.pyplot as plt
-from IPython.display import Audio
+import urllib.request
+from pathlib import Path
 from omegaconf import OmegaConf
 import torch
 
@@ -26,14 +23,89 @@ except ModuleNotFoundError:
     raise
 
 
-def diarize_audio(audio_filepath, out_dir, num_speakers=2):
+def download_config(output_dir: str, domain_type: str = "meeting"):
     """
-    Perform speaker diarization on an audio file.
+    Download the official NeMo configuration file.
+    
+    Args:
+        output_dir: Directory to store config file
+        domain_type: Type of audio domain ('meeting' or 'telephonic')
+    
+    Returns:
+        Path to the downloaded config file
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    
+    config_file_name = f"diar_infer_{domain_type}.yaml"
+    config_path = os.path.join(output_dir, config_file_name)
+    
+    # Download config if not exists
+    if not os.path.exists(config_path):
+        config_url = f"https://raw.githubusercontent.com/NVIDIA/NeMo/main/examples/speaker_tasks/diarization/conf/inference/{config_file_name}"
+        print(f"Downloading configuration from: {config_url}")
+        try:
+            urllib.request.urlretrieve(config_url, config_path)
+            print(f"Configuration downloaded to: {config_path}")
+        except Exception as e:
+            print(f"Error downloading config: {e}")
+            raise
+    else:
+        print(f"Using existing configuration: {config_path}")
+    
+    return config_path
+
+
+def setup_config(audio_file: str, output_dir: str, domain_type: str = "meeting", num_speakers: int = None):
+    """
+    Setup configuration for speaker diarization using official NeMo config.
+    
+    Args:
+        audio_file: Path to the input audio file
+        output_dir: Directory to store output files
+        domain_type: Type of audio domain ('meeting' or 'telephonic')
+        num_speakers: Number of speakers if known (optional)
+    
+    Returns:
+        OmegaConf configuration object
+    """
+    # Download official config
+    config_path = download_config(output_dir, domain_type)
+    
+    # Load configuration
+    cfg = OmegaConf.load(config_path)
+    
+    # Create manifest path
+    manifest_path = os.path.join(output_dir, 'manifest.json')
+    
+    # Update paths
+    cfg.diarizer.manifest_filepath = manifest_path
+    cfg.diarizer.out_dir = output_dir
+    
+    # Fix for Windows multiprocessing issues
+    # Windows uses 'spawn' instead of 'fork', which requires all objects to be pickleable
+    # Setting num_workers to 0 disables multiprocessing and avoids pickle errors
+    if platform.system() == 'Windows':
+        cfg.num_workers = 0
+        print("Windows detected: Setting num_workers=0 to avoid multiprocessing issues")
+    
+    # Update config with known number of speakers if provided
+    if num_speakers is not None:
+        cfg.diarizer.clustering.parameters.oracle_num_speakers = True
+        cfg.diarizer.clustering.parameters.max_num_speakers = num_speakers
+        print(f"Using oracle mode with {num_speakers} speakers")
+    
+    return cfg
+
+
+def diarize_audio(audio_filepath, out_dir, num_speakers=2, domain_type="meeting"):
+    """
+    Perform speaker diarization on an audio file using official NeMo configs.
     
     Args:
         audio_filepath (str): Path to the audio file to diarize
-        out_dir (str): Output directory for diarization results (default: 'diarization_output')
-        num_speakers (int, optional): Number of speakers if known (default: None for automatic detection)
+        out_dir (str): Output directory for diarization results
+        num_speakers (int, optional): Number of speakers if known (default: 2)
+        domain_type (str): Type of audio domain - 'meeting' or 'telephonic' (default: 'meeting')
     
     Returns:
         str: Content of the .rttm file containing diarization results
@@ -46,154 +118,121 @@ def diarize_audio(audio_filepath, out_dir, num_speakers=2):
     # Create output directory
     os.makedirs(out_dir, exist_ok=True)
     
-    # Create temporary input manifest file
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as temp_manifest:
-        manifest_data = {
-            "audio_filepath": audio_filepath,
-            "offset": 0,
-            "duration": None,
-            "label": "infer",
-            "num_speakers": num_speakers
-        }
-        json.dump(manifest_data, temp_manifest)
-        manifest_filepath = temp_manifest.name
+    print(f"Starting speaker diarization for: {audio_filepath}")
+    print(f"Output directory: {out_dir}")
+    print(f"Domain type: {domain_type}")
+    
+    # Create manifest file
+    audio_path = Path(audio_filepath).resolve()
+    
+    if not audio_path.exists():
+        raise FileNotFoundError(f"Audio file not found: {audio_filepath}")
+    
+    manifest_path = Path(out_dir) / "manifest.json"
+    
+    # Create manifest entry
+    manifest_entry = {
+        "audio_filepath": str(audio_path),
+        "offset": 0,
+        "duration": None,  # Will be calculated automatically
+        "label": "infer",
+        "text": "-",
+        "num_speakers": num_speakers,
+        "rttm_filepath": None,
+        "uem_filepath": None
+    }
+    
+    # Write manifest file
+    with open(manifest_path, 'w') as f:
+        json.dump(manifest_entry, f)
+        f.write('\n')
+    
+    print(f"Created manifest file: {manifest_path}")
     
     try:
-        # Detect device: use GPU if available, otherwise fall back to CPU
-        # device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        device = 'cpu'
-        print(f"Using device: {device}")
-        if device == 'cuda':
-            print(f"GPU: {torch.cuda.get_device_name(0)}")
+        # Setup configuration using official NeMo config
+        cfg = setup_config(audio_filepath, out_dir, domain_type, num_speakers)
         
-        # Detect OS
-        is_windows = platform.system() == 'Windows'
+        # Initialize the diarization model
+        print("Initializing ClusteringDiarizer model...")
+        print("Downloading pretrained models (this may take a while on first run)...")
         
-        # Set batch sizes and num_workers based on device and OS
-        # GPU: Use larger batches and parallel workers for better utilization
-        # CPU: Use smaller batches and no workers to avoid overhead
-        # Windows: Always use num_workers=0 to avoid multiprocessing handle errors
-        if device == 'cuda':
-            batch_size = 64
-            vad_batch_size = 64
-            speaker_batch_size = 64
-            # On Windows, multiprocessing with CUDA causes handle errors
-            num_workers = 0 if is_windows else 4
-            print(f"Using optimized settings for GPU (num_workers={num_workers} due to {'Windows' if is_windows else 'Linux/Unix'})")
-        else:
-            batch_size = 32
-            vad_batch_size = 32
-            speaker_batch_size = 32
-            num_workers = 0
-            print("Using optimized settings for CPU")
-        
-        # Create configuration
-        CONFIG = OmegaConf.create({
-            'batch_size': batch_size,
-            'sample_rate': 16000,
-            'verbose': True,
-            'diarizer': {
-                'collar': 0.25,
-                'ignore_overlap': True,
-                'manifest_filepath': manifest_filepath,
-                'out_dir': out_dir,
-                'oracle_vad': False,
-                'vad': {
-                    'model_path': 'vad_multilingual_marblenet',
-                    'batch_size': vad_batch_size,
-                    'parameters': {
-                        'window_length_in_sec': 0.63,
-                        'shift_length_in_sec': 0.08,
-                        'smoothing': False,
-                        'overlap': 0.5,
-                        'scale': 'absolute',
-                        'onset': 0.7,
-                        'offset': 0.4,
-                        'pad_onset': 0.1,
-                        'pad_offset': -0.05,
-                        'min_duration_on': 0.1,
-                        'min_duration_off': 0.3,
-                        'filter_speech_first': True,
-                        'normalize': False
-                    }
-                },
-                'speaker_embeddings': {
-                    'model_path': 'titanet_large',
-                    'batch_size': speaker_batch_size,
-                    'parameters': {
-                        'window_length_in_sec': [1.5, 1.25, 1.0, 0.75, 0.5],
-                        'shift_length_in_sec': [0.75, 0.625, 0.5, 0.375, 0.25],
-                        'multiscale_weights': [1, 1, 1, 1, 1],
-                        'save_embeddings': False
-                    }
-                },
-                'clustering': {
-                    'parameters': {
-                        'oracle_num_speakers': False,
-                        'max_num_speakers': 8,
-                        'max_rp_threshold': 0.15,
-                        'sparse_search_volume': 30
-                    }
-                },
-                'msdd_model': {
-                    'model_path': 'diar_msdd_telephonic',
-                    'parameters': {
-                        'sigmoid_threshold': [0.7, 1.0],
-                        'use_speaker_embed': True,
-                        'use_clus_as_spk_embed': False,
-                        'infer_batch_size': 25,
-                        'seq_eval_mode': False,
-                        'diar_window_length': 50,
-                        'overlap_infer_spk_limit': 5,
-                        'max_overlap_spk_num': None
-                    }
-                }
-            },
-            'num_workers': num_workers,
-            'device': device
-        })
+        # Create diarizer
+        diarizer = ClusteringDiarizer(cfg=cfg)
         
         # Run diarization
-        diarizer = ClusteringDiarizer(cfg=CONFIG)
+        print("Performing diarization...")
         diarizer.diarize()
         
-        print(f"{'*' * 50} out_dir: {out_dir}")
-        # Find and read the .rttm file
-        rttm_dir = os.path.join(out_dir, 'pred_rttms')
-        if not os.path.exists(rttm_dir):
-            raise FileNotFoundError(f"RTTM directory not found: {rttm_dir}")
+        print(f"\n{'='*60}")
+        print("Diarization complete!")
+        print(f"{'='*60}")
+        print(f"\nResults saved to: {out_dir}")
         
-        rttm_files = [f for f in os.listdir(rttm_dir) if f.endswith('.rttm')]
-        if not rttm_files:
-            raise FileNotFoundError(f"No .rttm file found in: {rttm_dir}")
+        # Print RTTM file location
+        audio_basename = Path(audio_filepath).stem
+        rttm_file = Path(out_dir) / "pred_rttms" / f"{audio_basename}.rttm"
         
-        # Read the first .rttm file found
-        rttm_filepath = os.path.join(rttm_dir, rttm_files[0])
-        with open(rttm_filepath, 'r') as f:
-            rttm_content = f.read()
+        if rttm_file.exists():
+            print(f"RTTM file: {rttm_file}")
+            with open(rttm_file, 'r') as f:
+                rttm_content = f.read()
+            return rttm_content
+        else:
+            # Fallback: try to find any .rttm file
+            rttm_dir = os.path.join(out_dir, 'pred_rttms')
+            if os.path.exists(rttm_dir):
+                rttm_files = [f for f in os.listdir(rttm_dir) if f.endswith('.rttm')]
+                if rttm_files:
+                    rttm_filepath = os.path.join(rttm_dir, rttm_files[0])
+                    print(f"RTTM file: {rttm_filepath}")
+                    with open(rttm_filepath, 'r') as f:
+                        rttm_content = f.read()
+                    return rttm_content
+            
+            raise FileNotFoundError("RTTM file not found. Check the output directory for results.")
         
-        print(f"\nDiarization complete! Results saved to: {out_dir}")
-        print(f"RTTM file: {rttm_filepath}")
-        return rttm_content
-        
-    finally:
-        # Clean up temporary manifest file
-        if os.path.exists(manifest_filepath):
-            os.unlink(manifest_filepath)
+    except Exception as e:
+        print(f"\nError during diarization: {e}")
+        print("\nTroubleshooting tips:")
+        print("1. Make sure your audio file is in a supported format (WAV, FLAC, MP3)")
+        print("2. Check that the audio file is not corrupted")
+        print("3. Ensure you have sufficient disk space for model downloads")
+        print("4. Try updating nemo_toolkit: pip install --upgrade nemo_toolkit[asr]")
+        raise
 
 
 # Example usage (can be commented out or removed when used as a module)
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Perform speaker diarization on an audio file.')
-    parser.add_argument('audio_file', type=str, nargs='?', default='./demo/phone_recordings/test.wav',
-                        help='Path to the audio file to diarize (default: ./demo/phone_recordings/test.wav)')
-    parser.add_argument('--out_dir', type=str, default='./temp/diarization_output',
-                        help='Output directory for diarization results (default: ./temp/diarization_output)')
+    parser = argparse.ArgumentParser(
+        description='Perform speaker diarization on an audio file using official NeMo configs.',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python diarization.py ./test.wav
+  python diarization.py ./test.wav --out_dir results
+  python diarization.py ./test.wav --num_speakers 3
+  python diarization.py ./test.wav --domain_type telephonic
+        """
+    )
+    parser.add_argument('audio_file', type=str, nargs='?', default='./test.wav',
+                        help='Path to the audio file to diarize (default: ./test.wav)')
+    parser.add_argument('--out_dir', type=str, default='./diarization_output',
+                        help='Output directory for diarization results (default: ./diarization_output)')
+    parser.add_argument('--num_speakers', type=int, default=2,
+                        help='Number of speakers (default: 2)')
+    parser.add_argument('--domain_type', type=str, choices=['meeting', 'telephonic'], default='meeting',
+                        help='Audio domain type: "meeting" for general audio or "telephonic" for phone calls (default: meeting)')
     
     args = parser.parse_args()
     
     if os.path.exists(args.audio_file):
-        rttm_content = diarize_audio(args.audio_file, out_dir=args.out_dir)
+        rttm_content = diarize_audio(
+            audio_filepath=args.audio_file,
+            out_dir=args.out_dir,
+            num_speakers=args.num_speakers,
+            domain_type=args.domain_type
+        )
         print("\n=== RTTM Content ===")
         print(rttm_content)
     else:
