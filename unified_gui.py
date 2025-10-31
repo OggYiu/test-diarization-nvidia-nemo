@@ -10,6 +10,8 @@ Unified Gradio GUI combining all phone call analysis tools:
 8. Multi-LLM Query
 9. STT Stock Comparison
 10. Transcription Merger
+11. Transaction Analysis
+12. Combined JSON Viewer
 
 Modular version - each tab is in a separate file in the tabs/ directory
 """
@@ -28,6 +30,8 @@ from tabs import (
     # create_multi_llm_tab,
     create_stt_stock_comparison_tab,
     # create_transcription_merger_tab,
+    create_transaction_analysis_tab,
+    create_combined_json_viewer_tab,
 )
 
 
@@ -54,6 +58,8 @@ def create_unified_interface():
             # create_multi_llm_tab()
             create_stt_stock_comparison_tab()
             # create_transcription_merger_tab()
+            create_transaction_analysis_tab()
+            create_combined_json_viewer_tab()
     
     return demo
 

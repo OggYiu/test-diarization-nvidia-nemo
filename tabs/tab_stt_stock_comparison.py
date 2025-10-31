@@ -3,8 +3,10 @@ Tab: STT & Stock Extraction Comparison
 Compare transcriptions from different STT models and extract stock information using multiple LLMs
 """
 
+import json
 import traceback
 from typing import List, Optional
+from datetime import datetime
 import gradio as gr
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pydantic import BaseModel, Field
@@ -73,6 +75,7 @@ DEFAULT_SYSTEM_MESSAGE = """你是一位精通粵語的香港股市分析專家�
 - 誤認: 百 → 正確: 八 (例: 一百一三八 → 18138)
 - 誤認: 孤/沽 → 正確: 賣出
 - 誤認: 轮 → 正確: 窩輪
+- 誤認: 星 → 正確: 升
 
 **你的目標:**
 1. 識別所有提及的股票代號和名稱
@@ -228,7 +231,7 @@ def process_transcriptions(
     system_message: str,
     ollama_url: str,
     temperature: float,
-) -> tuple[str, str]:
+) -> tuple[str, str, str]:
     """
     Process both transcriptions with selected LLMs and compare results.
     
@@ -241,21 +244,21 @@ def process_transcriptions(
         temperature: Temperature parameter
         
     Returns:
-        tuple[str, str]: (formatted_comparison, raw_json_collection)
+        tuple[str, str, str]: (formatted_comparison, raw_json_collection, combined_json)
     """
     try:
         # Validate inputs
         if not transcription1 or not transcription1.strip():
-            return "❌ Error: Please provide transcription 1", ""
+            return "❌ Error: Please provide transcription 1", "", ""
         
         if not transcription2 or not transcription2.strip():
-            return "❌ Error: Please provide transcription 2", ""
+            return "❌ Error: Please provide transcription 2", "", ""
         
         if not selected_llms or len(selected_llms) == 0:
-            return "❌ Error: Please select at least one LLM", ""
+            return "❌ Error: Please select at least one LLM", "", ""
         
         if not ollama_url or not ollama_url.strip():
-            return "❌ Error: Please specify Ollama URL", ""
+            return "❌ Error: Please specify Ollama URL", "", ""
         
         # Results storage
         results_trans1 = {}
@@ -352,11 +355,84 @@ def process_transcriptions(
             json_output.append(value)
             json_output.append("")
         
-        return "\n".join(output_parts), "\n".join(json_output)
+        # Create combined JSON structure with merged stocks
+        # Dictionary to track stocks by stock_number
+        stocks_dict = {}  # key: stock_number, value: list of stock data
+        
+        # Parse all results and collect stocks
+        for key, json_str in raw_jsons.items():
+            if json_str and json_str.strip():
+                try:
+                    parsed = json.loads(json_str)
+                    # Extract stocks from the parsed result
+                    stocks = parsed.get("stocks", [])
+                    
+                    for stock in stocks:
+                        stock_number = stock.get("stock_number", "")
+                        if stock_number:
+                            if stock_number not in stocks_dict:
+                                stocks_dict[stock_number] = []
+                            stocks_dict[stock_number].append(stock)
+                
+                except json.JSONDecodeError:
+                    # Skip invalid JSON
+                    continue
+        
+        # Merge stocks and calculate average relevance_score
+        merged_stocks = []
+        
+        for stock_number, stock_list in stocks_dict.items():
+            if not stock_list:
+                continue
+            
+            # Calculate average relevance_score
+            relevance_scores = [s.get("relevance_score", 0) for s in stock_list]
+            avg_relevance_score = sum(relevance_scores) / len(relevance_scores) if relevance_scores else 0
+            
+            # Use the first stock's data as base
+            merged_stock = {
+                "stock_number": stock_number,
+                "stock_name": stock_list[0].get("stock_name", ""),
+                "relevance_score": round(avg_relevance_score, 2),
+            }
+            
+            # Determine confidence - use the most common one, or highest if tied
+            confidences = [s.get("confidence", "low").lower() for s in stock_list]
+            confidence_priority = {"high": 3, "medium": 2, "low": 1}
+            most_confident = max(confidences, key=lambda c: (confidences.count(c), confidence_priority.get(c, 0)))
+            merged_stock["confidence"] = most_confident
+            
+            # Combine reasoning from all sources (if present)
+            reasonings = [s.get("reasoning", "") for s in stock_list if s.get("reasoning")]
+            if reasonings:
+                # Only include unique reasonings
+                unique_reasonings = list(dict.fromkeys(reasonings))  # Preserve order while removing duplicates
+                if len(unique_reasonings) == 1:
+                    merged_stock["reasoning"] = unique_reasonings[0]
+                else:
+                    merged_stock["reasoning"] = " | ".join(unique_reasonings)
+            
+            # Add metadata about how many times this stock was found
+            merged_stock["detection_count"] = len(stock_list)
+            
+            merged_stocks.append(merged_stock)
+        
+        # Sort by relevance_score (descending) then by stock_number
+        merged_stocks.sort(key=lambda s: (-s["relevance_score"], s["stock_number"]))
+        
+        # Create simplified combined JSON with only stocks
+        combined_data = {
+            "stocks": merged_stocks
+        }
+        
+        # Format combined JSON
+        combined_json = json.dumps(combined_data, indent=2, ensure_ascii=False)
+        
+        return "\n".join(output_parts), "\n".join(json_output), combined_json
         
     except Exception as e:
         error_msg = f"❌ Error: {str(e)}\n\nTraceback:\n{traceback.format_exc()}"
-        return error_msg, ""
+        return error_msg, "", ""
 
 
 # ============================================================================
@@ -432,7 +508,7 @@ def create_stt_stock_comparison_tab():
                 
                 results_box = gr.Textbox(
                     label="Stock Extraction Comparison",
-                    lines=25,
+                    lines=20,
                     interactive=False,
                     show_copy_button=True,
                 )
@@ -440,10 +516,20 @@ def create_stt_stock_comparison_tab():
                 gr.Markdown("#### 🔧 Raw JSON Outputs")
                 
                 json_box = gr.Textbox(
-                    label="Structured Data (JSON)",
-                    lines=12,
+                    label="Individual JSON Results",
+                    lines=10,
                     interactive=False,
                     show_copy_button=True,
+                )
+                
+                gr.Markdown("#### 📦 Combined JSON Output")
+                
+                combined_json_box = gr.Textbox(
+                    label="Single Unified JSON",
+                    lines=15,
+                    interactive=False,
+                    show_copy_button=True,
+                    info="All results combined into a single JSON structure"
                 )
         
         # Example buttons
@@ -465,7 +551,7 @@ def create_stt_stock_comparison_tab():
                 ollama_url_box,
                 temperature_slider,
             ],
-            outputs=[results_box, json_box],
+            outputs=[results_box, json_box, combined_json_box],
         )
         
         # Example button handlers
@@ -529,6 +615,7 @@ def create_stt_stock_comparison_tab():
             3. **調整設置**: 可選調整系統訊息、Temperature 等參數
             4. **開始分析**: 點擊「Analyze & Compare」按鈕
             5. **查看對比**: 系統會並行處理所有組合，顯示詳細對比結果
+            6. **導出數據**: 可從「Combined JSON Output」複製統一的 JSON 結構
             
             ### 🎯 功能特點 (Features)
             
@@ -538,6 +625,7 @@ def create_stt_stock_comparison_tab():
             - 📊 **結構化輸出**: 使用 Pydantic 保證數據格式一致
             - 🔍 **智能修正**: 自動識別並修正 STT 錯誤
             - 📈 **置信度評估**: 每個識別結果都有置信度評分
+            - 📦 **統一 JSON**: 所有結果組合成單一 JSON 文件，便於後續處理
             """
         )
 

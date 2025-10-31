@@ -13,6 +13,8 @@ from .tab_llm_comparison import create_llm_comparison_tab
 from .tab_multi_llm import create_multi_llm_tab
 from .tab_stt_stock_comparison import create_stt_stock_comparison_tab
 from .tab_transcription_merger import create_transcription_merger_tab
+from .tab_transaction_analysis import create_transaction_analysis_tab
+from .tab_combined_json_viewer import create_combined_json_viewer_tab
 
 __all__ = [
     'create_file_metadata_tab',
@@ -25,5 +27,7 @@ __all__ = [
     'create_multi_llm_tab',
     'create_stt_stock_comparison_tab',
     'create_transcription_merger_tab',
+    'create_transaction_analysis_tab',
+    'create_combined_json_viewer_tab',
 ]
 
