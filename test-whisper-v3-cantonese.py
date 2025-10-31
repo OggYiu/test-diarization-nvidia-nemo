@@ -12,7 +12,7 @@ model = WhisperForConditionalGeneration.from_pretrained("khleeloo/whisper-large-
 processor = WhisperProcessor.from_pretrained("khleeloo/whisper-large-v3-cantonese")
 
 # Load the audio file
-audio_file = "test.wav"
+audio_file = "2.wav"
 audio, sampling_rate = librosa.load(audio_file, sr=16000)
 
 # Process the audio
@@ -20,7 +20,7 @@ input_features = processor(audio, sampling_rate=sampling_rate, return_tensors="p
 
 # Generate transcription
 with torch.no_grad():
-    predicted_ids = model.generate(input_features)
+    predicted_ids = model.generate(input_features, language="yue")
 
 # Decode the transcription
 transcription = processor.batch_decode(predicted_ids, skip_special_tokens=True)

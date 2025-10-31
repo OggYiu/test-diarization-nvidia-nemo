@@ -10,6 +10,7 @@ from .tab_llm_analysis import create_llm_analysis_tab
 from .tab_speaker_separation import create_speaker_separation_tab
 from .tab_audio_enhancement import create_audio_enhancement_tab
 from .tab_llm_comparison import create_llm_comparison_tab
+from .tab_multi_llm import create_multi_llm_tab
 
 __all__ = [
     'create_file_metadata_tab',
@@ -19,5 +20,6 @@ __all__ = [
     'create_speaker_separation_tab',
     'create_audio_enhancement_tab',
     'create_llm_comparison_tab',
+    'create_multi_llm_tab',
 ]
 

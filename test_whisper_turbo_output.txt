@@ -1,0 +1,14 @@
+WHISPER LARGE-V3-TURBO TRANSCRIPTION
+================================================================================
+
+Audio File: ./test.wav
+Model: openai/whisper-large-v3-turbo
+Device: cpu
+
+FULL TRANSCRIPTION:
+ 喂 喂 930 抽到所有搞坞尽量一马 在咋
+
+
+TRANSCRIPTION WITH TIMESTAMPS:
+--------------------------------------------------------------------------------
+<|0.00|> 喂<|1.32|><|1.32|> 喂 930 抽到所有搞坞尽量一马<|4.38|><|4.38|> 在咋<|6.14|>

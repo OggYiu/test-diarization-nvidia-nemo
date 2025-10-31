@@ -7,31 +7,310 @@ import os
 import re
 import time
 import json
+import csv
 import shutil
 import tempfile
 import zipfile
 import traceback
 import urllib.request
 from pathlib import Path
+from datetime import datetime, timedelta
 import gradio as gr
 
 from funasr import AutoModel
 from batch_stt import format_str_v3, load_audio
 from audio_chopper import chop_audio_file, read_rttm_file
+from diarization import diarize_audio
+from mongodb_utils import load_from_mongodb, save_to_mongodb, find_one_from_mongodb
 
-# Import for WSYue-ASR model
+# Import for Whisper-v3-Cantonese model
 from transformers import WhisperProcessor, WhisperForConditionalGeneration
 from huggingface_hub import hf_hub_download
 import librosa
 import torch
 import sys
 
+# MongoDB collection names
+DIARIZATION_COLLECTION = "diarization_results"
+METADATA_COLLECTION = "file_metadata"
+
 # Global variables for model management
 sensevoice_model = None
-wsyue_model = None
-wsyue_processor = None
+whisperv3_cantonese_model = None
+whisperv3_cantonese_processor = None
 current_sensevoice_loaded = False
-current_wsyue_loaded = False
+current_whisperv3_cantonese_loaded = False
+
+# Device management for GPU/CPU
+def get_device_info():
+    """
+    Detect and return information about available compute device (GPU/CPU).
+    
+    Returns:
+        tuple: (device, device_name, device_info_str)
+    """
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+        device_name = torch.cuda.get_device_name(0)
+        device_info = f"🚀 GPU: {device_name}"
+        device_memory = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+        device_info += f" ({device_memory:.1f} GB)"
+    else:
+        device = torch.device("cpu")
+        device_name = "CPU"
+        device_info = f"💻 CPU: {torch.get_num_threads()} threads"
+    
+    return device, device_name, device_info
+
+# Get device once at module load
+DEVICE, DEVICE_NAME, DEVICE_INFO = get_device_info()
+DEVICE = "cpu"
+
+def load_diarization_cache():
+    """
+    Load cached diarization results from MongoDB.
+    
+    Returns:
+        dict: Dictionary mapping filename to cached results
+    """
+    cache = {}
+    
+    # Load all documents from MongoDB
+    documents = load_from_mongodb(DIARIZATION_COLLECTION)
+    
+    for doc in documents:
+        cache[doc['filename']] = {
+            'rttm_content': doc['rttm_content'],
+            'processing_time': float(doc['processing_time']),
+            'num_segments': int(doc['num_segments']),
+            'num_speakers': int(doc['num_speakers']),
+            'speaker_ids': doc['speaker_ids'],
+            'timestamp': doc['timestamp']
+        }
+    
+    return cache
+
+
+def save_diarization_to_cache(filename, rttm_content, processing_time, num_segments, num_speakers, speaker_ids):
+    """
+    Save diarization result to MongoDB cache.
+    
+    Args:
+        filename: Name of the audio file
+        rttm_content: RTTM content string
+        processing_time: Time taken to process
+        num_segments: Number of segments detected
+        num_speakers: Number of speakers detected
+        speaker_ids: Comma-separated speaker IDs
+    """
+    # Prepare document
+    document = {
+        'filename': filename,
+        'rttm_content': rttm_content,
+        'processing_time': processing_time,
+        'num_segments': num_segments,
+        'num_speakers': num_speakers,
+        'speaker_ids': speaker_ids,
+        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    }
+    
+    # Save to MongoDB with upsert on filename
+    save_to_mongodb(DIARIZATION_COLLECTION, document, unique_key='filename')
+
+
+def parse_filename_metadata(filename: str, csv_path: str = "client.csv") -> dict:
+    """
+    Parse audio filename to extract metadata and format output.
+    
+    Expected filename format:
+    [Broker Name Broker_ID]_Unknown1-ClientPhone_YYYYMMDDHHMMSS(Unknown2).wav
+    or
+    [Broker Name]_Unknown1-ClientPhone_YYYYMMDDHHMMSS(Unknown2).wav
+    
+    Args:
+        filename: The audio filename to parse
+        csv_path: Path to client.csv file for name lookup
+        
+    Returns:
+        dict: Dictionary with 'status' (success/error), 'formatted_output' (display string), 
+              and 'data' (structured metadata dict)
+    """
+    try:
+        # Remove extension
+        base_name = os.path.splitext(filename)[0]
+        
+        # Parse filename using regex
+        # Pattern 1 (with brackets and parentheses): [Broker Name Optional_ID]_Unknown1-ClientPhone_DateTime(Unknown2)
+        pattern1 = r'\[(.*?)\]_(\d+)-(\d+)_(\d{14})\((\d+)\)'
+        match = re.match(pattern1, base_name)
+        
+        # Pattern 2 (sanitized by Gradio - no brackets or parentheses): Broker Name Optional_ID_Unknown1-ClientPhone_DateTime Unknown2
+        # Example: "Dickson Lau 0489_8330-97501167_2025101001451020981"
+        if not match:
+            pattern2 = r'(.*?)_(\d+)-(\d+)_(\d{14})(\d+)'
+            match = re.match(pattern2, base_name)
+        
+        if not match:
+            error_msg = f"""❌ Error: Filename does not match expected pattern.
+
+Expected format:
+[Broker Name ID]_8330-97501167_20251010014510(20981).wav
+
+Received:
+{filename}
+
+Note: The filename may have been sanitized by the system. 
+Please ensure special characters are preserved or manually enter the correct format.
+"""
+            return {
+                'status': 'error',
+                'formatted_output': error_msg,
+                'data': None
+            }
+        
+        broker_info = match.group(1)  # e.g., "Dickson Lau 0489" or "Dickson Lau"
+        # unknown_1 = match.group(2)     # e.g., "8330"
+        client_number = match.group(3) # e.g., "97501167"
+        datetime_str = match.group(4)  # e.g., "20251010014510"
+        # unknown_2 = match.group(5)     # e.g., "20981"
+        
+        # Parse broker name and ID
+        broker_parts = broker_info.rsplit(' ', 1)  # Split from right to handle multi-word names
+        if len(broker_parts) == 2 and broker_parts[1].isdigit():
+            broker_name = broker_parts[0]
+            broker_id = broker_parts[1]
+        else:
+            broker_name = broker_info
+            broker_id = "N/A"
+        
+        # Parse datetime (UTC)
+        try:
+            utc_dt = datetime.strptime(datetime_str, "%Y%m%d%H%M%S")
+            # Convert to HKT (UTC+8)
+            hkt_dt = utc_dt + timedelta(hours=8)
+            
+            utc_formatted = utc_dt.strftime("%Y-%m-%dT%H:%M:%S")
+            hkt_formatted = hkt_dt.strftime("%Y-%m-%dT%H:%M:%S")
+        except ValueError as e:
+            error_msg = f"❌ Error parsing datetime: {str(e)}"
+            return {
+                'status': 'error',
+                'formatted_output': error_msg,
+                'data': None
+            }
+        
+        # Look up client name and ID in CSV
+        client_name = "Not found"
+        client_id = "Not found"
+        if os.path.exists(csv_path):
+            try:
+                with open(csv_path, 'r', encoding='utf-8') as csvfile:
+                    csv_reader = csv.DictReader(csvfile)
+                    for row in csv_reader:
+                        # Find name column
+                        name_col = None
+                        for col in row.keys():
+                            if 'name' in col.lower() or 'client' in col.lower():
+                                name_col = col
+                                break
+                        
+                        # Check if phone number matches any of the three phone columns
+                        # CSV format: AE,acctno,name,mobile,home,office
+                        phone_columns = ['mobile', 'home', 'office']
+                        for phone_col in phone_columns:
+                            if phone_col in row and row[phone_col].strip() == client_number:
+                                if name_col:
+                                    client_name = row[name_col].strip()
+                                # Get client ID (acctno column)
+                                if 'acctno' in row:
+                                    client_id = row['acctno'].strip()
+                                break
+                        
+                        # If we found the client, exit the loop
+                        if client_name != "Not found":
+                            break
+            except Exception as e:
+                client_name = f"Error reading CSV: {str(e)}"
+                client_id = "Error reading CSV"
+        else:
+            client_name = "client.csv not found"
+            client_id = "client.csv not found"
+        
+        # Format output for display
+        formatted_output = f"""✅ Metadata extracted successfully
+
+Broker Name: {broker_name}
+Broker Id: {broker_id}
+Client Number: {client_number}
+Client Name: {client_name}
+Client Id: {client_id}
+UTC: {utc_formatted}
+HKT: {hkt_formatted}
+
+💾 Saved to MongoDB
+"""
+        
+        # Prepare structured data
+        metadata_dict = {
+            'filename': filename,
+            'broker_name': broker_name,
+            'broker_id': broker_id,
+            'client_number': client_number,
+            'client_name': client_name,
+            'client_id': client_id,
+            'utc_datetime': utc_formatted,
+            'hkt_datetime': hkt_formatted,
+            'utc_datetime_obj': utc_dt,
+            'hkt_datetime_obj': hkt_dt,
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
+        
+        return {
+            'status': 'success',
+            'formatted_output': formatted_output,
+            'data': metadata_dict
+        }
+        
+    except Exception as e:
+        error_msg = f"❌ Error parsing filename: {str(e)}\n\n{traceback.format_exc()}"
+        return {
+            'status': 'error',
+            'formatted_output': error_msg,
+            'data': None
+        }
+
+
+def process_file_metadata(audio_file):
+    """
+    Process uploaded audio file and extract metadata from filename.
+    Also saves the metadata to MongoDB.
+    
+    Args:
+        audio_file: Audio file from Gradio interface
+        
+    Returns:
+        str: Formatted metadata string
+    """
+    if audio_file is None:
+        return "❌ No file uploaded. Please drag and drop an audio file."
+    
+    try:
+        # Get filename
+        filename = os.path.basename(audio_file)
+        
+        # Parse metadata
+        result = parse_filename_metadata(filename)
+        
+        # If parsing was successful, save to MongoDB
+        if result['status'] == 'success' and result['data']:
+            save_to_mongodb(METADATA_COLLECTION, result['data'], unique_key='filename')
+        
+        # Return the formatted output string for display
+        return result['formatted_output']
+        
+    except Exception as e:
+        error_msg = f"❌ Error: {str(e)}\n\n{traceback.format_exc()}"
+        return error_msg
 
 
 def initialize_sensevoice_model():
@@ -43,6 +322,7 @@ def initialize_sensevoice_model():
         return f"✅ SenseVoiceSmall already loaded"
     
     status = f"🔄 Loading SenseVoiceSmall model...\n"
+    status += f"  ⚙️ Device: {DEVICE_INFO}\n"
     
     try:
         sensevoice_model = AutoModel(
@@ -53,75 +333,50 @@ def initialize_sensevoice_model():
             disable_update=True,
         )
         current_sensevoice_loaded = True
-        status += "✅ SenseVoiceSmall loaded successfully!"
+        status += f"✅ SenseVoiceSmall loaded successfully! (FunASR handles device internally)"
         return status
     except Exception as e:
         status += f"❌ Failed to load SenseVoiceSmall: {str(e)}"
         return status
 
 
-def initialize_wsyue_model():
-    """Initialize the WSYue-ASR (Whisper Cantonese) model."""
-    global wsyue_model, wsyue_processor, current_wsyue_loaded
+def initialize_whisperv3_cantonese_model():
+    """Initialize the Whisper-v3-Cantonese model."""
+    global whisperv3_cantonese_model, whisperv3_cantonese_processor, current_whisperv3_cantonese_loaded
     
     # Only reload if not already loaded
-    if current_wsyue_loaded and wsyue_model is not None:
-        return f"✅ WSYue-ASR already loaded"
+    if current_whisperv3_cantonese_loaded and whisperv3_cantonese_model is not None:
+        return f"✅ Whisper-v3-Cantonese already loaded on {DEVICE_NAME}"
     
-    status = f"🔄 Loading WSYue-ASR (Whisper Cantonese) model...\n"
+    status = f"🔄 Loading Whisper-v3-Cantonese model...\n"
+    status += f"  ⚙️ Device: {DEVICE_INFO}\n"
     
     try:
-        # Download the model checkpoint from Hugging Face
-        model_path = hf_hub_download(
-            repo_id="ASLP-lab/WSYue-ASR",
-            filename="whisper_medium_yue/whisper_medium_yue.pt",
-            cache_dir="./model_cache"
+        # Load the model and processor from Hugging Face
+        whisperv3_cantonese_model = WhisperForConditionalGeneration.from_pretrained(
+            "khleeloo/whisper-large-v3-cantonese"
         )
-        status += f"  ✓ Model checkpoint downloaded\n"
+        whisperv3_cantonese_processor = WhisperProcessor.from_pretrained(
+            "khleeloo/whisper-large-v3-cantonese"
+        )
+        status += f"  ✓ Model and processor loaded\n"
         
-        # Load the base Whisper medium model architecture
-        wsyue_model = WhisperForConditionalGeneration.from_pretrained("openai/whisper-medium")
-        wsyue_processor = WhisperProcessor.from_pretrained("openai/whisper-medium")
-        status += f"  ✓ Base Whisper architecture loaded\n"
-        
-        # Load the fine-tuned weights
-        checkpoint = torch.load(model_path, map_location="cpu")
-        
-        # The checkpoint might be stored in different formats
-        if isinstance(checkpoint, dict):
-            if "model" in checkpoint:
-                state_dict = checkpoint["model"]
-            elif "state_dict" in checkpoint:
-                state_dict = checkpoint["state_dict"]
-            else:
-                state_dict = checkpoint
-        else:
-            state_dict = checkpoint
-        
-        # Load the state dict into the model
-        try:
-            wsyue_model.load_state_dict(state_dict, strict=False)
-            status += f"  ✓ Fine-tuned weights loaded\n"
-        except Exception as e:
-            # Try to load compatible weights only
-            model_dict = wsyue_model.state_dict()
-            compatible_dict = {k: v for k, v in state_dict.items() if k in model_dict and v.shape == model_dict[k].shape}
-            model_dict.update(compatible_dict)
-            wsyue_model.load_state_dict(model_dict)
-            status += f"  ✓ Loaded {len(compatible_dict)}/{len(state_dict)} weight tensors\n"
+        # Move model to device (GPU if available)
+        whisperv3_cantonese_model = whisperv3_cantonese_model.to(DEVICE)
+        status += f"  ✓ Model moved to {DEVICE_NAME}\n"
         
         # Set model to evaluation mode
-        wsyue_model.eval()
-        current_wsyue_loaded = True
+        whisperv3_cantonese_model.eval()
+        current_whisperv3_cantonese_loaded = True
         
-        status += "✅ WSYue-ASR loaded successfully!"
+        status += f"✅ Whisper-v3-Cantonese loaded successfully on {DEVICE_NAME}!"
         return status
     except Exception as e:
-        status += f"❌ Failed to load WSYue-ASR: {str(e)}"
+        status += f"❌ Failed to load Whisper-v3-Cantonese: {str(e)}"
         return status
 
 
-def transcribe_single_audio_sensevoice(audio_path, language="auto"):
+def transcribe_single_audio_sensevoice(audio_path, language="yue"):
     """Transcribe a single audio file using SenseVoiceSmall model."""
     global sensevoice_model
     
@@ -159,11 +414,11 @@ def transcribe_single_audio_sensevoice(audio_path, language="auto"):
         return None
 
 
-def transcribe_single_audio_wsyue(audio_path):
-    """Transcribe a single audio file using WSYue-ASR model."""
-    global wsyue_model, wsyue_processor
+def transcribe_single_audio_whisperv3_cantonese(audio_path):
+    """Transcribe a single audio file using Whisper-v3-Cantonese model."""
+    global whisperv3_cantonese_model, whisperv3_cantonese_processor
     
-    if wsyue_model is None or wsyue_processor is None:
+    if whisperv3_cantonese_model is None or whisperv3_cantonese_processor is None:
         return None
     
     # Load audio
@@ -171,19 +426,17 @@ def transcribe_single_audio_wsyue(audio_path):
         audio, sampling_rate = librosa.load(audio_path, sr=16000)
         
         # Process the audio
-        input_features = wsyue_processor(audio, sampling_rate=sampling_rate, return_tensors="pt").input_features
+        input_features = whisperv3_cantonese_processor(audio, sampling_rate=sampling_rate, return_tensors="pt").input_features
+        
+        # Move input to device
+        input_features = input_features.to(DEVICE)
         
         # Generate transcription
         with torch.no_grad():
-            predicted_ids = wsyue_model.generate(
-                input_features,
-                language="zh",
-                task="transcribe",
-                max_length=448
-            )
+            predicted_ids = whisperv3_cantonese_model.generate(input_features, language="yue")
         
         # Decode the transcription
-        transcription = wsyue_processor.batch_decode(predicted_ids, skip_special_tokens=True)
+        transcription = whisperv3_cantonese_processor.batch_decode(predicted_ids, skip_special_tokens=True)
         transcription_text = transcription[0]
         
         return {
@@ -193,32 +446,29 @@ def transcribe_single_audio_wsyue(audio_path):
             "raw_transcription": transcription_text
         }
     except Exception as e:
-        print(f"Error transcribing with WSYue {audio_path}: {e}")
+        print(f"Error transcribing with Whisper-v3-Cantonese {audio_path}: {e}")
         return None
 
 
-def process_chop_and_transcribe(audio_file, rttm_text, language, use_sensevoice, use_wsyue, padding_ms=100, progress=gr.Progress()):
+def process_chop_and_transcribe(audio_file, language, use_sensevoice, use_whisperv3_cantonese, overwrite_diarization=False, padding_ms=100, progress=gr.Progress()):
     """
-    Integrated pipeline: Chop audio based on RTTM, then transcribe the segments.
+    Integrated pipeline: Auto-diarize (with cache), chop audio based on RTTM, then transcribe the segments.
     
     Args:
         audio_file: Audio file from Gradio interface
-        rttm_text: RTTM text string pasted by user
         language: Language code for transcription
         use_sensevoice: Whether to use SenseVoiceSmall model
-        use_wsyue: Whether to use WSYue-ASR model
+        use_whisperv3_cantonese: Whether to use Whisper-v3-Cantonese model
+        overwrite_diarization: If True, reprocess diarization even if cached
         padding_ms: Padding in milliseconds for chopping (default: 100)
     
     Returns:
-        tuple: (json_file, sensevoice_txt, wsyue_txt, zip_file, sensevoice_conversation, wsyue_conversation, status_message)
+        tuple: (json_file, sensevoice_txt, whisperv3_txt, zip_file, sensevoice_conversation, whisperv3_conversation, status_message)
     """
     if audio_file is None:
         return None, None, None, None, "", "", "❌ No audio file uploaded"
     
-    if not rttm_text or not rttm_text.strip():
-        return None, None, None, None, "", "", "❌ No RTTM text provided"
-    
-    if not use_sensevoice and not use_wsyue:
+    if not use_sensevoice and not use_whisperv3_cantonese:
         return None, None, None, None, "", "", "⚠️ Please select at least one model"
     
     try:
@@ -227,24 +477,96 @@ def process_chop_and_transcribe(audio_file, rttm_text, language, use_sensevoice,
         chopped_audio_dir = os.path.join(temp_out_dir, "chopped_segments")
         os.makedirs(chopped_audio_dir, exist_ok=True)
         
-        status = f"🔄 Starting integrated pipeline (Chop + Transcribe)...\n\n"
-        status += f"📁 Audio file: {os.path.basename(audio_file)}\n"
+        filename = os.path.basename(audio_file)
+        
+        status = f"🔄 Starting integrated pipeline (Auto-Diarize + Chop + Transcribe)...\n\n"
+        status += f"📁 Audio file: {filename}\n"
         status += f"⏱️ Padding: {padding_ms} ms\n\n"
         
-        # Step 1: Save RTTM text to a temporary file
-        progress(0, desc="Preparing RTTM...")
+        # Step 1: Check MongoDB for cached RTTM or run diarization
+        progress(0, desc="Checking for cached diarization...")
+        cache = load_diarization_cache()
+        
+        rttm_content = None
+        
+        if filename in cache and not overwrite_diarization:
+            # Load from cache
+            cached = cache[filename]
+            rttm_content = cached['rttm_content']
+            
+            status += f"💾 Loaded cached RTTM from MongoDB for: {filename}\n"
+            status += f"📅 Previously processed: {cached['timestamp']}\n"
+            status += f"  • Segments: {cached['num_segments']}\n"
+            status += f"  • Speakers: {cached['num_speakers']} ({cached['speaker_ids']})\n"
+            status += f"  • Original processing time: {cached['processing_time']:.2f}s\n"
+            status += f"  • ⚡ Cache hit - instant retrieval!\n\n"
+        else:
+            # Run diarization
+            if overwrite_diarization and filename in cache:
+                status += f"♻️ Overwrite mode: Reprocessing diarization despite existing cache\n\n"
+            else:
+                status += f"🔍 No cached RTTM found. Running diarization...\n\n"
+            
+            progress(0.05, desc="Running diarization...")
+            diarization_temp_dir = tempfile.mkdtemp(prefix="diarization_")
+            
+            diarization_start = time.time()
+            rttm_content = diarize_audio(
+                audio_filepath=audio_file,
+                out_dir=diarization_temp_dir,
+                num_speakers=2
+            )
+            diarization_end = time.time()
+            diarization_time = diarization_end - diarization_start
+            
+            # Parse RTTM to get statistics
+            lines = rttm_content.strip().split('\n')
+            num_segments = len(lines)
+            speakers = set()
+            for line in lines:
+                if line.strip():
+                    parts = line.split()
+                    if len(parts) >= 8:
+                        speakers.add(parts[7])
+            
+            speaker_ids_str = ', '.join(sorted(speakers))
+            
+            # Save to MongoDB cache
+            save_diarization_to_cache(
+                filename=filename,
+                rttm_content=rttm_content,
+                processing_time=diarization_time,
+                num_segments=num_segments,
+                num_speakers=len(speakers),
+                speaker_ids=speaker_ids_str
+            )
+            
+            status += f"✅ Diarization completed!\n"
+            status += f"  • Processing time: {diarization_time:.2f}s ({diarization_time/60:.2f} min)\n"
+            status += f"  • Segments: {num_segments}\n"
+            status += f"  • Speakers: {len(speakers)} ({speaker_ids_str})\n"
+            status += f"  • 💾 Saved to MongoDB for future use\n\n"
+            
+            # Clean up diarization temp directory
+            try:
+                shutil.rmtree(diarization_temp_dir)
+            except:
+                pass
+        
+        # Step 2: Save RTTM text to a temporary file
+        progress(0.1, desc="Preparing RTTM...")
         temp_rttm_file = os.path.join(temp_out_dir, "temp_rttm.rttm")
         with open(temp_rttm_file, 'w', encoding='utf-8') as f:
-            f.write(rttm_text.strip())
-        status += "✅ RTTM text saved\n"
+            f.write(rttm_content.strip())
+        status += "✅ RTTM data prepared\n"
         
-        # Step 2: Read RTTM segments
-        progress(0.05, desc="Reading RTTM...")
-        status += "📖 Reading RTTM data...\n"
+        # Step 3: Read RTTM segments
+        progress(0.15, desc="Reading RTTM...")
+        status += "📖 Reading RTTM segments...\n"
         segments = read_rttm_file(temp_rttm_file)
         
         if not segments:
-            return None, None, None, None, "", "", "❌ No segments found in RTTM text!"
+            return None, None, None, None, "", "", "❌ No segments found in RTTM data!"
         
         status += f"✅ Found {len(segments)} segments\n\n"
         
@@ -252,8 +574,8 @@ def process_chop_and_transcribe(audio_file, rttm_text, language, use_sensevoice,
         speakers = set(seg['speaker'] for seg in segments)
         status += f"👥 Detected speakers: {len(speakers)} ({', '.join(sorted(speakers))})\n\n"
         
-        # Step 3: Chop audio file
-        progress(0.1, desc="Chopping audio...")
+        # Step 4: Chop audio file
+        progress(0.2, desc="Chopping audio...")
         status += "✂️ Chopping audio into segments...\n"
         chop_audio_file(audio_file, segments, chopped_audio_dir, padding_ms)
         
@@ -266,34 +588,34 @@ def process_chop_and_transcribe(audio_file, rttm_text, language, use_sensevoice,
         
         status += f"✅ Audio chopped into {len(chopped_files)} segments\n\n"
         
-        # Step 4: Initialize models
-        progress(0.2, desc="Loading models...")
+        # Step 5: Initialize models
+        progress(0.25, desc="Loading models...")
         if use_sensevoice:
             sensevoice_status = initialize_sensevoice_model()
             status += sensevoice_status + "\n"
-        if use_wsyue:
-            wsyue_status = initialize_wsyue_model()
-            status += wsyue_status + "\n"
+        if use_whisperv3_cantonese:
+            whisperv3_status = initialize_whisperv3_cantonese_model()
+            status += whisperv3_status + "\n"
         status += "\n"
         
         if use_sensevoice and sensevoice_model is None:
             return None, None, None, None, "", "", status + "❌ Failed to load SenseVoiceSmall model"
-        if use_wsyue and wsyue_model is None:
-            return None, None, None, None, "", "", status + "❌ Failed to load WSYue-ASR model"
+        if use_whisperv3_cantonese and whisperv3_cantonese_model is None:
+            return None, None, None, None, "", "", status + "❌ Failed to load Whisper-v3-Cantonese model"
         
-        # Step 5: Transcribe chopped segments
+        # Step 6: Transcribe chopped segments
         status += f"📝 Transcribing {len(chopped_files)} segment(s)...\n\n"
         start_time = time.time()
         
         sensevoice_results = []
-        wsyue_results = []
+        whisperv3_results = []
         total_files = len(chopped_files)
         
         # Process all files with SenseVoice first
         if use_sensevoice:
             status += f"🎙️ Processing with SenseVoiceSmall...\n\n"
             for i, audio_path in enumerate(chopped_files):
-                progress((0.2 + 0.35 * (i / total_files)), desc=f"SenseVoice {i+1}/{total_files}...")
+                progress((0.25 + 0.3 * (i / total_files)), desc=f"SenseVoice {i+1}/{total_files}...")
                 
                 filename = os.path.basename(audio_path)
                 status += f"[{i+1}/{total_files}] {filename}\n"
@@ -309,25 +631,25 @@ def process_chop_and_transcribe(audio_file, rttm_text, language, use_sensevoice,
             
             status += f"✅ SenseVoice completed: {len(sensevoice_results)}/{total_files} files\n\n"
         
-        # Then process all files with WSYue
-        if use_wsyue:
-            status += f"🎙️ Processing with WSYue-ASR...\n\n"
+        # Then process all files with Whisper-v3-Cantonese
+        if use_whisperv3_cantonese:
+            status += f"🎙️ Processing with Whisper-v3-Cantonese...\n\n"
             for i, audio_path in enumerate(chopped_files):
-                progress((0.55 + 0.35 * (i / total_files)), desc=f"WSYue {i+1}/{total_files}...")
+                progress((0.55 + 0.35 * (i / total_files)), desc=f"Whisper-v3 {i+1}/{total_files}...")
                 
                 filename = os.path.basename(audio_path)
                 status += f"[{i+1}/{total_files}] {filename}\n"
                 
-                result = transcribe_single_audio_wsyue(audio_path)
+                result = transcribe_single_audio_whisperv3_cantonese(audio_path)
                 if result:
-                    wsyue_results.append(result)
-                    status += f"  ✅ WSYue: {result['transcription'][:80]}{'...' if len(result['transcription']) > 80 else ''}\n"
+                    whisperv3_results.append(result)
+                    status += f"  ✅ Whisper-v3: {result['transcription'][:80]}{'...' if len(result['transcription']) > 80 else ''}\n"
                 else:
-                    status += f"  ❌ WSYue: Failed\n"
+                    status += f"  ❌ Whisper-v3: Failed\n"
                 
                 status += "\n"
             
-            status += f"✅ WSYue completed: {len(wsyue_results)}/{total_files} files\n\n"
+            status += f"✅ Whisper-v3-Cantonese completed: {len(whisperv3_results)}/{total_files} files\n\n"
         
         end_time = time.time()
         processing_time = end_time - start_time
@@ -344,7 +666,7 @@ def process_chop_and_transcribe(audio_file, rttm_text, language, use_sensevoice,
         # Save results to JSON files
         results_data = {
             "sensevoice": sensevoice_results if use_sensevoice else [],
-            "wsyue": wsyue_results if use_wsyue else []
+            "whisperv3_cantonese": whisperv3_results if use_whisperv3_cantonese else []
         }
         json_path = os.path.join(temp_out_dir, "transcriptions.json")
         with open(json_path, 'w', encoding='utf-8') as f:
@@ -364,19 +686,19 @@ def process_chop_and_transcribe(audio_file, rttm_text, language, use_sensevoice,
             with open(sensevoice_txt_path, 'r', encoding='utf-8') as f:
                 sensevoice_conversation_content = f.read()
         
-        # Save WSYue conversation.txt
-        wsyue_txt_path = None
-        wsyue_conversation_content = ""
-        if use_wsyue and wsyue_results:
-            wsyue_txt_path = os.path.join(temp_out_dir, "conversation_wsyue.txt")
-            with open(wsyue_txt_path, 'w', encoding='utf-8') as f:
-                for r in wsyue_results:
+        # Save Whisper-v3-Cantonese conversation.txt
+        whisperv3_txt_path = None
+        whisperv3_conversation_content = ""
+        if use_whisperv3_cantonese and whisperv3_results:
+            whisperv3_txt_path = os.path.join(temp_out_dir, "conversation_whisperv3_cantonese.txt")
+            with open(whisperv3_txt_path, 'w', encoding='utf-8') as f:
+                for r in whisperv3_results:
                     fname = r.get('file', '')
                     speaker = get_speaker_name(fname)
                     f.write(f"{speaker}: {r.get('transcription', '')}\n")
             
-            with open(wsyue_txt_path, 'r', encoding='utf-8') as f:
-                wsyue_conversation_content = f.read()
+            with open(whisperv3_txt_path, 'r', encoding='utf-8') as f:
+                whisperv3_conversation_content = f.read()
         
         # Create a zip file with all results
         zip_path = os.path.join(temp_out_dir, "transcription_results.zip")
@@ -384,10 +706,10 @@ def process_chop_and_transcribe(audio_file, rttm_text, language, use_sensevoice,
             zipf.write(json_path, arcname="transcriptions.json")
             if sensevoice_txt_path:
                 zipf.write(sensevoice_txt_path, arcname="conversation_sensevoice.txt")
-            if wsyue_txt_path:
-                zipf.write(wsyue_txt_path, arcname="conversation_wsyue.txt")
+            if whisperv3_txt_path:
+                zipf.write(whisperv3_txt_path, arcname="conversation_whisperv3_cantonese.txt")
         
-        # Step 6: Clean up temporary chopped files
+        # Step 7: Clean up temporary chopped files
         progress(0.95, desc="Cleaning up...")
         try:
             shutil.rmtree(chopped_audio_dir)
@@ -402,18 +724,18 @@ def process_chop_and_transcribe(audio_file, rttm_text, language, use_sensevoice,
         status += f"⏱️ Processing time: {processing_time:.2f} seconds ({processing_time/60:.2f} minutes)\n"
         if use_sensevoice:
             status += f"📊 SenseVoice processed: {len(sensevoice_results)}/{total_files} segments\n"
-        if use_wsyue:
-            status += f"📊 WSYue processed: {len(wsyue_results)}/{total_files} segments\n"
+        if use_whisperv3_cantonese:
+            status += f"📊 Whisper-v3-Cantonese processed: {len(whisperv3_results)}/{total_files} segments\n"
         status += f"📁 Results saved to:\n"
         status += f"   • transcriptions.json\n"
         if sensevoice_txt_path:
             status += f"   • conversation_sensevoice.txt\n"
-        if wsyue_txt_path:
-            status += f"   • conversation_wsyue.txt\n"
+        if whisperv3_txt_path:
+            status += f"   • conversation_whisperv3_cantonese.txt\n"
         status += f"   • transcription_results.zip\n"
         status += f"{'='*60}\n"
         
-        return json_path, sensevoice_txt_path, wsyue_txt_path, zip_path, sensevoice_conversation_content, wsyue_conversation_content, status
+        return json_path, sensevoice_txt_path, whisperv3_txt_path, zip_path, sensevoice_conversation_content, whisperv3_conversation_content, status
         
     except Exception as e:
         error_msg = f"❌ Error during pipeline: {str(e)}"
@@ -421,7 +743,7 @@ def process_chop_and_transcribe(audio_file, rttm_text, language, use_sensevoice,
         return None, None, None, None, "", "", error_msg
 
 
-def process_batch_transcription(audio_files, zip_file, link_or_path, language, use_sensevoice, use_wsyue, progress=gr.Progress()):
+def process_batch_transcription(audio_files, zip_file, link_or_path, language, use_sensevoice, use_whisperv3_cantonese, progress=gr.Progress()):
     """
     Process multiple audio files for transcription.
     
@@ -431,16 +753,16 @@ def process_batch_transcription(audio_files, zip_file, link_or_path, language, u
         link_or_path: URL to a zip file or local folder path
         language: Language code for transcription
         use_sensevoice: Whether to use SenseVoiceSmall model
-        use_wsyue: Whether to use WSYue-ASR model
+        use_whisperv3_cantonese: Whether to use Whisper-v3-Cantonese model
     
     Returns:
-        tuple: (json_file, txt_file, zip_file, sensevoice_conversation, wsyue_conversation)
+        tuple: (json_file, sensevoice_txt_file, whisperv3_txt_file, zip_file, sensevoice_conversation, whisperv3_conversation)
     """
     if (not audio_files or len(audio_files) == 0) and not zip_file and not link_or_path:
-        return None, None, None, "", ""
+        return None, None, None, None, "", ""
     
-    if not use_sensevoice and not use_wsyue:
-        return None, None, None, "⚠️ Please select at least one model", ""
+    if not use_sensevoice and not use_whisperv3_cantonese:
+        return None, None, None, None, "⚠️ Please select at least one model", ""
     
     try:
         # Create a temporary output directory
@@ -455,15 +777,15 @@ def process_batch_transcription(audio_files, zip_file, link_or_path, language, u
         if use_sensevoice:
             sensevoice_status = initialize_sensevoice_model()
             status += sensevoice_status + "\n"
-        if use_wsyue:
-            wsyue_status = initialize_wsyue_model()
-            status += wsyue_status + "\n"
+        if use_whisperv3_cantonese:
+            whisperv3_status = initialize_whisperv3_cantonese_model()
+            status += whisperv3_status + "\n"
         status += "\n"
         
         if use_sensevoice and sensevoice_model is None:
-            return None, None, None, "❌ Failed to load SenseVoiceSmall model", ""
-        if use_wsyue and wsyue_model is None:
-            return None, None, None, "", "❌ Failed to load WSYue-ASR model"
+            return None, None, None, None, "❌ Failed to load SenseVoiceSmall model", ""
+        if use_whisperv3_cantonese and whisperv3_cantonese_model is None:
+            return None, None, None, None, "", "❌ Failed to load Whisper-v3-Cantonese model"
         
         # Copy uploaded files to temp directory and sort them
         progress(0.1, desc="Preparing files...")
@@ -488,7 +810,7 @@ def process_batch_transcription(audio_files, zip_file, link_or_path, language, u
                                 status += f"  ✅ Extracted: {os.path.basename(filename)}\n"
                     status += f"\n📊 Total files extracted from zip: {len(audio_paths)}\n\n"
             except Exception as e:
-                return None, None, None, None, f"❌ Error extracting zip: {str(e)}", ""
+                return None, None, None, None, None, f"❌ Error extracting zip: {str(e)}", "", ""
         
         # Handle individual audio files
         if audio_files and len(audio_files) > 0:
@@ -526,7 +848,7 @@ def process_batch_transcription(audio_files, zip_file, link_or_path, language, u
                                     status += f"  ✅ Extracted: {os.path.basename(filename)}\n"
                     status += f"\n📊 Total files extracted from URL: {len(audio_paths)}\n\n"
                 except Exception as e:
-                    return None, None, None, None, f"❌ Error downloading from URL: {str(e)}", ""
+                    return None, None, None, None, None, f"❌ Error downloading from URL: {str(e)}", "", ""
             
             # Check if it's a local folder path
             elif os.path.isdir(link_or_path):
@@ -545,7 +867,7 @@ def process_batch_transcription(audio_files, zip_file, link_or_path, language, u
                                 status += f"  ✅ Copied: {file}\n"
                     status += f"\n📊 Total files from folder: {len(audio_paths)}\n\n"
                 except Exception as e:
-                    return None, None, None, None, f"❌ Error reading folder: {str(e)}", ""
+                    return None, None, None, None, None, f"❌ Error reading folder: {str(e)}", "", ""
             
             # Check if it's a local zip file path
             elif os.path.isfile(link_or_path) and link_or_path.lower().endswith('.zip'):
@@ -574,8 +896,8 @@ def process_batch_transcription(audio_files, zip_file, link_or_path, language, u
         models_used = []
         if use_sensevoice:
             models_used.append("SenseVoiceSmall")
-        if use_wsyue:
-            models_used.append("WSYue-ASR")
+        if use_whisperv3_cantonese:
+            models_used.append("Whisper-v3-Cantonese")
         status += f"🤖 Models: {', '.join(models_used)}\n\n"
         
         # Sort files by name (for segment_001.wav, segment_002.wav ordering)
@@ -585,7 +907,7 @@ def process_batch_transcription(audio_files, zip_file, link_or_path, language, u
         
         # Process each file with selected models
         sensevoice_results = []
-        wsyue_results = []
+        whisperv3_results = []
         total_files = len(audio_paths)
         
         status += f"📝 Processing {total_files} audio file(s)...\n\n"
@@ -610,25 +932,25 @@ def process_batch_transcription(audio_files, zip_file, link_or_path, language, u
             
             status += f"✅ SenseVoice completed: {len(sensevoice_results)}/{total_files} files\n\n"
         
-        # Then process all files with WSYue (for better model caching)
-        if use_wsyue:
-            status += f"🎙️ Processing with WSYue-ASR...\n\n"
+        # Then process all files with Whisper-v3-Cantonese (for better model caching)
+        if use_whisperv3_cantonese:
+            status += f"🎙️ Processing with Whisper-v3-Cantonese...\n\n"
             for i, audio_path in enumerate(audio_paths):
-                progress((0.45 + 0.35 * (i / total_files)), desc=f"WSYue {i+1}/{total_files}...")
+                progress((0.45 + 0.45 * (i / total_files)), desc=f"Whisper-v3 {i+1}/{total_files}...")
                 
                 filename = os.path.basename(audio_path)
                 status += f"[{i+1}/{total_files}] {filename}\n"
                 
-                result = transcribe_single_audio_wsyue(audio_path)
+                result = transcribe_single_audio_whisperv3_cantonese(audio_path)
                 if result:
-                    wsyue_results.append(result)
-                    status += f"  ✅ WSYue: {result['transcription'][:80]}{'...' if len(result['transcription']) > 80 else ''}\n"
+                    whisperv3_results.append(result)
+                    status += f"  ✅ Whisper-v3: {result['transcription'][:80]}{'...' if len(result['transcription']) > 80 else ''}\n"
                 else:
-                    status += f"  ❌ WSYue: Failed\n"
+                    status += f"  ❌ Whisper-v3: Failed\n"
                 
                 status += "\n"
             
-            status += f"✅ WSYue completed: {len(wsyue_results)}/{total_files} files\n\n"
+            status += f"✅ Whisper-v3-Cantonese completed: {len(whisperv3_results)}/{total_files} files\n\n"
         
         end_time = time.time()
         processing_time = end_time - start_time
@@ -638,7 +960,7 @@ def process_batch_transcription(audio_files, zip_file, link_or_path, language, u
         # Save results to JSON files
         results_data = {
             "sensevoice": sensevoice_results if use_sensevoice else [],
-            "wsyue": wsyue_results if use_wsyue else []
+            "whisperv3_cantonese": whisperv3_results if use_whisperv3_cantonese else []
         }
         json_path = os.path.join(temp_out_dir, "transcriptions.json")
         with open(json_path, 'w', encoding='utf-8') as f:
@@ -665,19 +987,19 @@ def process_batch_transcription(audio_files, zip_file, link_or_path, language, u
             with open(sensevoice_txt_path, 'r', encoding='utf-8') as f:
                 sensevoice_conversation_content = f.read()
         
-        # Save WSYue conversation.txt
-        wsyue_txt_path = None
-        wsyue_conversation_content = ""
-        if use_wsyue and wsyue_results:
-            wsyue_txt_path = os.path.join(temp_out_dir, "conversation_wsyue.txt")
-            with open(wsyue_txt_path, 'w', encoding='utf-8') as f:
-                for r in wsyue_results:
+        # Save Whisper-v3-Cantonese conversation.txt
+        whisperv3_txt_path = None
+        whisperv3_conversation_content = ""
+        if use_whisperv3_cantonese and whisperv3_results:
+            whisperv3_txt_path = os.path.join(temp_out_dir, "conversation_whisperv3_cantonese.txt")
+            with open(whisperv3_txt_path, 'w', encoding='utf-8') as f:
+                for r in whisperv3_results:
                     fname = r.get('file', '')
                     speaker = get_speaker_name(fname)
                     f.write(f"{speaker}: {r.get('transcription', '')}\n")
             
-            with open(wsyue_txt_path, 'r', encoding='utf-8') as f:
-                wsyue_conversation_content = f.read()
+            with open(whisperv3_txt_path, 'r', encoding='utf-8') as f:
+                whisperv3_conversation_content = f.read()
         
         # Create a zip file with all results
         zip_path = os.path.join(temp_out_dir, "batch_transcription_results.zip")
@@ -685,8 +1007,8 @@ def process_batch_transcription(audio_files, zip_file, link_or_path, language, u
             zipf.write(json_path, arcname="transcriptions.json")
             if sensevoice_txt_path:
                 zipf.write(sensevoice_txt_path, arcname="conversation_sensevoice.txt")
-            if wsyue_txt_path:
-                zipf.write(wsyue_txt_path, arcname="conversation_wsyue.txt")
+            if whisperv3_txt_path:
+                zipf.write(whisperv3_txt_path, arcname="conversation_whisperv3_cantonese.txt")
         
         progress(1.0, desc="Complete!")
         
@@ -695,18 +1017,18 @@ def process_batch_transcription(audio_files, zip_file, link_or_path, language, u
         status += f"⏱️ Processing time: {processing_time:.2f} seconds ({processing_time/60:.2f} minutes)\n"
         if use_sensevoice:
             status += f"📊 SenseVoice processed: {len(sensevoice_results)}/{total_files} files\n"
-        if use_wsyue:
-            status += f"📊 WSYue processed: {len(wsyue_results)}/{total_files} files\n"
+        if use_whisperv3_cantonese:
+            status += f"📊 Whisper-v3-Cantonese processed: {len(whisperv3_results)}/{total_files} files\n"
         status += f"📁 Results saved to:\n"
         status += f"   • transcriptions.json\n"
         if sensevoice_txt_path:
             status += f"   • conversation_sensevoice.txt\n"
-        if wsyue_txt_path:
-            status += f"   • conversation_wsyue.txt\n"
+        if whisperv3_txt_path:
+            status += f"   • conversation_whisperv3_cantonese.txt\n"
         status += f"   • batch_transcription_results.zip\n"
         status += f"{'='*60}\n"
         
-        return json_path, sensevoice_txt_path, wsyue_txt_path, zip_path, sensevoice_conversation_content, wsyue_conversation_content
+        return json_path, sensevoice_txt_path, whisperv3_txt_path, zip_path, sensevoice_conversation_content, whisperv3_conversation_content
         
     except Exception as e:
         error_msg = f"❌ Error during batch transcription: {str(e)}"
@@ -716,9 +1038,9 @@ def process_batch_transcription(audio_files, zip_file, link_or_path, language, u
 
 def create_stt_tab():
     """Create and return the Batch Speech-to-Text tab (with integrated chopping)"""
-    with gr.Tab("3️⃣ Chop & Transcribe"):
-        gr.Markdown("### Chop audio by RTTM and transcribe segments")
-        gr.Markdown("*Upload an audio file and paste RTTM text to automatically chop and transcribe*")
+    with gr.Tab("3️⃣ Auto-Diarize & Transcribe"):
+        gr.Markdown("### Automatically diarize, chop, and transcribe audio")
+        gr.Markdown("*Upload an audio file. Diarization will be cached in MongoDB for future use.*")
         
         with gr.Row():
             with gr.Column(scale=1):
@@ -730,11 +1052,22 @@ def create_stt_tab():
                     sources=["upload"]
                 )
                 
-                stt_rttm_text = gr.Textbox(
-                    label="RTTM Content",
-                    placeholder="Paste RTTM content here...\n\nExample:\nSPEAKER test 1 0.000 2.500 <NA> <NA> speaker_0 <NA> <NA>\nSPEAKER test 1 2.500 3.200 <NA> <NA> speaker_1 <NA> <NA>",
-                    lines=8,
-                    max_lines=15
+                # Add metadata extraction section
+                gr.Markdown("#### 📋 File Metadata")
+                stt_extract_metadata_btn = gr.Button("📋 Extract Metadata from Filename", size="sm")
+                stt_metadata_output = gr.Textbox(
+                    label="Metadata Results",
+                    lines=10,
+                    max_lines=15,
+                    interactive=False,
+                    show_copy_button=True,
+                    placeholder="Metadata will appear here..."
+                )
+                
+                stt_overwrite_diarization = gr.Checkbox(
+                    label="🔄 Overwrite cached diarization",
+                    value=False,
+                    info="If checked, will re-run diarization even if MongoDB cache exists"
                 )
                 
                 gr.Markdown("#### Model Selection")
@@ -744,10 +1077,10 @@ def create_stt_tab():
                         value=True,
                         info="Chinese/Multi-language ASR"
                     )
-                    stt_use_wsyue = gr.Checkbox(
-                        label="WSYue-ASR (Whisper Cantonese)",
+                    stt_use_whisperv3_cantonese = gr.Checkbox(
+                        label="Whisper-v3-Cantonese",
                         value=False,
-                        info="Cantonese-optimized Whisper"
+                        info="Large Whisper v3 Cantonese"
                     )
                 
                 stt_language_dropdown = gr.Dropdown(
@@ -757,20 +1090,9 @@ def create_stt_tab():
                     info="Select the language of the audio"
                 )
                 
-                stt_process_btn = gr.Button("✂️🎙️ Chop & Transcribe", variant="primary", size="lg")
+                stt_process_btn = gr.Button("🎯 Auto-Diarize & Transcribe", variant="primary", size="lg")
                 
             with gr.Column(scale=2):
-                gr.Markdown("#### Processing Status")
-                stt_status_output = gr.Textbox(
-                    label="Status Log",
-                    lines=8,
-                    max_lines=15,
-                    interactive=False,
-                    show_copy_button=True
-                )
-                
-                gr.Markdown("#### Transcription Results")
-                
                 with gr.Row():
                     with gr.Column(scale=1):
                         gr.Markdown("##### 📝 SenseVoiceSmall")
@@ -784,24 +1106,38 @@ def create_stt_tab():
                         )
                     
                     with gr.Column(scale=1):
-                        gr.Markdown("##### 📝 WSYue-ASR (Whisper Cantonese)")
-                        stt_wsyue_output = gr.Textbox(
-                            label="WSYue-ASR Transcription",
+                        gr.Markdown("##### 📝 Whisper-v3-Cantonese")
+                        stt_whisperv3_output = gr.Textbox(
+                            label="Whisper-v3-Cantonese Transcription",
                             lines=15,
                             max_lines=25,
                             interactive=False,
                             show_copy_button=True,
-                            placeholder="WSYue-ASR results will appear here..."
+                            placeholder="Whisper-v3-Cantonese results will appear here..."
                         )
-                
                 stt_zip_download = gr.File(
                     label="Download All Results (ZIP)",
                     interactive=False
                 )
+                stt_status_output = gr.Textbox(
+                    label="Status Log",
+                    lines=8,
+                    max_lines=15,
+                    interactive=False,
+                    show_copy_button=True
+                )
         
+        # Wire up metadata extraction button
+        stt_extract_metadata_btn.click(
+            fn=process_file_metadata,
+            inputs=[stt_audio_input],
+            outputs=[stt_metadata_output]
+        )
+        
+        # Wire up the main transcription button
         stt_process_btn.click(
             fn=process_chop_and_transcribe,
-            inputs=[stt_audio_input, stt_rttm_text, stt_language_dropdown, stt_use_sensevoice, stt_use_wsyue],
-            outputs=[gr.File(visible=False), gr.File(visible=False), gr.File(visible=False), stt_zip_download, stt_sensevoice_output, stt_wsyue_output, stt_status_output]
+            inputs=[stt_audio_input, stt_language_dropdown, stt_use_sensevoice, stt_use_whisperv3_cantonese, stt_overwrite_diarization],
+            outputs=[gr.File(visible=False), gr.File(visible=False), gr.File(visible=False), stt_zip_download, stt_sensevoice_output, stt_whisperv3_output, stt_status_output]
         )
 

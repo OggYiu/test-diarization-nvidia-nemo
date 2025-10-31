@@ -17,67 +17,49 @@ MODEL_OPTIONS = [
     "gpt-oss:20b",
     "gemma3-27b",
     "deepseek-r1:32b",
+    "deepseek-r1:70b",
 ]
 
 DEFAULT_MODEL = MODEL_OPTIONS[0]
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
 
-
-def load_stock_list(csv_path: str = "stockList.csv") -> str:
-    """
-    Load stock list from CSV file and format it for the system prompt.
-    
-    Args:
-        csv_path: Path to the stock list CSV file
-        
-    Returns:
-        str: Formatted stock list information
-    """
-    try:
-        stock_list_path = Path(csv_path)
-        if not stock_list_path.exists():
-            return ""
-        
-        stock_entries = []
-        with open(stock_list_path, 'r', encoding='utf-8') as f:
-            reader = csv.reader(f)
-            next(reader)  # Skip header
-            for row in reader:
-                if len(row) >= 2:
-                    stock_number = row[0].strip()
-                    stock_name = row[1].strip()
-                    stock_entries.append(f"{stock_number},{stock_name}")
-        
-        if stock_entries:
-            stock_list_text = "\n".join(stock_entries)
-            return f"""
-
-## 股票代號參考列表
-以下是香港股票代號及名稱列表（格式：股票代號,股票名稱）。你可以使用此列表來識別對話中提到的股票名稱或股票代號：
-
-{stock_list_text}
-"""
-        return ""
-    except Exception as e:
-        print(f"Warning: Could not load stock list: {e}")
-        return ""
-
-
-# Load stock list once at module initialization
-STOCK_LIST_INFO = load_stock_list()
-
 DEFAULT_SYSTEM_MESSAGE = (
-    f"""
-你是一位精通粵語以及香港股市的分析師。
+    f"""你是一位精通粵語的香港股市的分析師，現在你的工作是電話錄音分析專員。你將會分析電話錄音的文字版本，但由於Speech To Text 技術的誤差，有很多的文字會出現誤認使對話內容難以理解，要用你的聽聰明才智去想像原本的對話內容。
 
-請用繁體中文回應，並從下方對話中判斷誰是券商、誰是客戶，整理最終下單（股票代號、買/賣、價格、數量）,下單的數量有可能多於一單。
+# 請回應以下有關問題
+- 請用繁體中文回應，並從下方對話中判斷誰是券商、誰是客戶，整理最終下單（股票代號、買/賣、價格、數量）。
+- 留意在對話中，可能只是券商跟客戶的討論，並沒有任何交易，若有交易，下單的數量有可能多於一單。
 
-請用下列的資料作判別準則:
-
+# 請用下列的資料作判別準則
 - 留意客戶下單時候，券商一定會將下單的資料重覆一次讓客戶確定，若對話中沒有確定的對話，很可能不是下單。
 - 嘗試在對話找出股票號碼和股票名稱，並列出可能的股票號碼和股票名稱。
-{STOCK_LIST_INFO}
+
+# 以下是簡稱和術語，可以查看一下去協助你了解對話內容:
+- 簡稱: 轮，全寫: 窩輪
+- 簡稱: 沽/孤，全寫: 賣出
+
+# 以下是常見的Speech To Text 技術的誤差:
+- 誤認: 百，正寫: 八，例子: 一百一三八 -> 一八一三八, 即是 18138
     """
+
+#     """
+#     你是一位精通粵語的香港股市分析師，現在你的角色是電話錄音分析專員。你將分析電話錄音的文字轉錄版本（來自Speech-to-Text技術），但由於轉錄技術的誤差，文字中可能出現大量誤認詞彙，導致對話內容難以理解。你需要運用你的專業知識和邏輯推理，推斷並還原原本的對話意圖，尤其是涉及股票相關的部分。
+
+# 你的主要任務是：從轉錄文字中找出所有提及的股票名稱和股票代碼。如果文字有誤認，請修正它們，並解釋你的推理過程。最終輸出應包括：
+# - 修正後的股票名稱和代碼列表。
+# - 對每個修正的簡要解釋。
+
+
+# ### 以下是簡稱和術語，可以查看一下去協助你了解對話內容:
+# - 簡稱: 轮，全寫: 窩輪
+# - 簡稱: 沽/孤，全寫: 賣出
+
+# ### 常見的Speech-to-Text誤差類型（基於粵語發音相似性）：
+# - 誤認示例：將「八」誤認爲「百」。  
+#   例子：轉錄文字爲「一百百七」，正確應爲「一八八七」，即股票代碼1887。
+
+# 在分析時，請考慮上下文推斷可能的修正。如果無法確定，請標註爲「不確定」並提供備選可能性。
+# """
 )
 
 

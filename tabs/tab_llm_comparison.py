@@ -19,6 +19,7 @@ MODEL_OPTIONS = [
     "gpt-oss:20b",
     "gemma3-27b",
     "deepseek-r1:32b",
+    "deepseek-r1:70b",
 ]
 
 DEFAULT_MODEL = MODEL_OPTIONS[0]
