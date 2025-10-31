@@ -20,7 +20,14 @@ import gradio as gr
 from funasr import AutoModel
 from batch_stt import format_str_v3, load_audio
 from audio_chopper import chop_audio_file, read_rttm_file
-from diarization import diarize_audio
+
+try:
+    from diarization import diarize_audio
+    DIARIZATION_AVAILABLE = True
+except ImportError:
+    DIARIZATION_AVAILABLE = False
+    def diarize_audio(*args, **kwargs):
+        raise RuntimeError("Diarization is not available. NeMo is required but not installed.")
 from mongodb_utils import load_from_mongodb, save_to_mongodb, find_one_from_mongodb
 
 # Import for Whisper-v3-Cantonese model
@@ -33,6 +40,8 @@ import sys
 # MongoDB collection names
 DIARIZATION_COLLECTION = "diarization_results"
 METADATA_COLLECTION = "file_metadata"
+TRANSCRIPTION_SENSEVOICE_COLLECTION = "transcriptions_sensevoice"
+TRANSCRIPTION_WHISPERV3_COLLECTION = "transcriptions_whisperv3_cantonese"
 
 # Global variables for model management
 sensevoice_model = None
@@ -116,6 +125,100 @@ def save_diarization_to_cache(filename, rttm_content, processing_time, num_segme
     
     # Save to MongoDB with upsert on filename
     save_to_mongodb(DIARIZATION_COLLECTION, document, unique_key='filename')
+
+
+def load_transcription_cache_sensevoice():
+    """
+    Load cached SenseVoice transcription results from MongoDB.
+    
+    Returns:
+        dict: Dictionary mapping filename to cached transcription results
+    """
+    cache = {}
+    
+    # Load all documents from MongoDB
+    documents = load_from_mongodb(TRANSCRIPTION_SENSEVOICE_COLLECTION)
+    
+    for doc in documents:
+        cache[doc['filename']] = {
+            'transcription': doc['transcription'],
+            'raw_transcription': doc['raw_transcription'],
+            'language': doc.get('language', 'yue'),
+            'processing_time': float(doc['processing_time']),
+            'timestamp': doc['timestamp']
+        }
+    
+    return cache
+
+
+def save_transcription_to_cache_sensevoice(filename, transcription, raw_transcription, language, processing_time):
+    """
+    Save SenseVoice transcription result to MongoDB cache.
+    
+    Args:
+        filename: Name of the audio file
+        transcription: Formatted transcription text
+        raw_transcription: Raw transcription text
+        language: Language code used for transcription
+        processing_time: Time taken to process
+    """
+    document = {
+        'filename': filename,
+        'transcription': transcription,
+        'raw_transcription': raw_transcription,
+        'language': language,
+        'processing_time': processing_time,
+        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'model': 'SenseVoiceSmall'
+    }
+    
+    # Save to MongoDB with upsert on filename
+    save_to_mongodb(TRANSCRIPTION_SENSEVOICE_COLLECTION, document, unique_key='filename')
+
+
+def load_transcription_cache_whisperv3():
+    """
+    Load cached Whisper-v3-Cantonese transcription results from MongoDB.
+    
+    Returns:
+        dict: Dictionary mapping filename to cached transcription results
+    """
+    cache = {}
+    
+    # Load all documents from MongoDB
+    documents = load_from_mongodb(TRANSCRIPTION_WHISPERV3_COLLECTION)
+    
+    for doc in documents:
+        cache[doc['filename']] = {
+            'transcription': doc['transcription'],
+            'raw_transcription': doc['raw_transcription'],
+            'processing_time': float(doc['processing_time']),
+            'timestamp': doc['timestamp']
+        }
+    
+    return cache
+
+
+def save_transcription_to_cache_whisperv3(filename, transcription, processing_time):
+    """
+    Save Whisper-v3-Cantonese transcription result to MongoDB cache.
+    
+    Args:
+        filename: Name of the audio file
+        transcription: Transcription text
+        processing_time: Time taken to process
+    """
+    document = {
+        'filename': filename,
+        'transcription': transcription,
+        'raw_transcription': transcription,  # Whisper doesn't have separate raw format
+        'processing_time': processing_time,
+        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'model': 'Whisper-v3-Cantonese'
+    }
+    
+    # Save to MongoDB with upsert on filename
+    save_to_mongodb(TRANSCRIPTION_WHISPERV3_COLLECTION, document, unique_key='filename')
 
 
 def parse_filename_metadata(filename: str, csv_path: str = "client.csv") -> dict:
@@ -376,12 +479,42 @@ def initialize_whisperv3_cantonese_model():
         return status
 
 
-def transcribe_single_audio_sensevoice(audio_path, language="yue"):
-    """Transcribe a single audio file using SenseVoiceSmall model."""
+def transcribe_single_audio_sensevoice(audio_path, language="yue", use_cache=True):
+    """
+    Transcribe a single audio file using SenseVoiceSmall model.
+    
+    Args:
+        audio_path: Path to audio file
+        language: Language code for transcription
+        use_cache: Whether to use cached results (default: True)
+        
+    Returns:
+        dict: Transcription result with file, path, transcription, raw_transcription, and cache_hit
+    """
     global sensevoice_model
     
     if sensevoice_model is None:
         return None
+    
+    filename = os.path.basename(audio_path)
+    
+    # Check cache first
+    if use_cache:
+        cache = load_transcription_cache_sensevoice()
+        if filename in cache:
+            cached = cache[filename]
+            # Only use cache if language matches
+            if cached.get('language', 'yue') == language:
+                print(f"💾 Cache hit for SenseVoice: {filename}")
+                return {
+                    "file": filename,
+                    "path": audio_path,
+                    "transcription": cached['transcription'],
+                    "raw_transcription": cached['raw_transcription'],
+                    "cache_hit": True,
+                    "cached_time": cached.get('processing_time', 0),
+                    "cached_timestamp": cached.get('timestamp', '')
+                }
     
     # Load audio
     audio_array, sample_rate = load_audio(audio_path)
@@ -390,6 +523,7 @@ def transcribe_single_audio_sensevoice(audio_path, language="yue"):
     
     # Run inference
     try:
+        start_time = time.time()
         result = sensevoice_model.generate(
             input=audio_array,
             cache={},
@@ -398,31 +532,72 @@ def transcribe_single_audio_sensevoice(audio_path, language="yue"):
             batch_size_s=60,
             merge_vad=True
         )
+        end_time = time.time()
+        processing_time = end_time - start_time
         
         # Extract and format text
         raw_text = result[0]["text"]
         formatted_text = format_str_v3(raw_text)
         
+        # Save to cache
+        save_transcription_to_cache_sensevoice(
+            filename=filename,
+            transcription=formatted_text,
+            raw_transcription=raw_text,
+            language=language,
+            processing_time=processing_time
+        )
+        
         return {
-            "file": os.path.basename(audio_path),
+            "file": filename,
             "path": audio_path,
             "transcription": formatted_text,
-            "raw_transcription": raw_text
+            "raw_transcription": raw_text,
+            "cache_hit": False,
+            "processing_time": processing_time
         }
     except Exception as e:
         print(f"Error transcribing with SenseVoice {audio_path}: {e}")
         return None
 
 
-def transcribe_single_audio_whisperv3_cantonese(audio_path):
-    """Transcribe a single audio file using Whisper-v3-Cantonese model."""
+def transcribe_single_audio_whisperv3_cantonese(audio_path, use_cache=True):
+    """
+    Transcribe a single audio file using Whisper-v3-Cantonese model.
+    
+    Args:
+        audio_path: Path to audio file
+        use_cache: Whether to use cached results (default: True)
+        
+    Returns:
+        dict: Transcription result with file, path, transcription, raw_transcription, and cache_hit
+    """
     global whisperv3_cantonese_model, whisperv3_cantonese_processor
     
     if whisperv3_cantonese_model is None or whisperv3_cantonese_processor is None:
         return None
     
+    filename = os.path.basename(audio_path)
+    
+    # Check cache first
+    if use_cache:
+        cache = load_transcription_cache_whisperv3()
+        if filename in cache:
+            cached = cache[filename]
+            print(f"💾 Cache hit for Whisper-v3-Cantonese: {filename}")
+            return {
+                "file": filename,
+                "path": audio_path,
+                "transcription": cached['transcription'],
+                "raw_transcription": cached['raw_transcription'],
+                "cache_hit": True,
+                "cached_time": cached.get('processing_time', 0),
+                "cached_timestamp": cached.get('timestamp', '')
+            }
+    
     # Load audio
     try:
+        start_time = time.time()
         audio, sampling_rate = librosa.load(audio_path, sr=16000)
         
         # Process the audio
@@ -439,11 +614,23 @@ def transcribe_single_audio_whisperv3_cantonese(audio_path):
         transcription = whisperv3_cantonese_processor.batch_decode(predicted_ids, skip_special_tokens=True)
         transcription_text = transcription[0]
         
+        end_time = time.time()
+        processing_time = end_time - start_time
+        
+        # Save to cache
+        save_transcription_to_cache_whisperv3(
+            filename=filename,
+            transcription=transcription_text,
+            processing_time=processing_time
+        )
+        
         return {
-            "file": os.path.basename(audio_path),
+            "file": filename,
             "path": audio_path,
             "transcription": transcription_text,
-            "raw_transcription": transcription_text
+            "raw_transcription": transcription_text,
+            "cache_hit": False,
+            "processing_time": processing_time
         }
     except Exception as e:
         print(f"Error transcribing with Whisper-v3-Cantonese {audio_path}: {e}")
@@ -612,6 +799,7 @@ def process_chop_and_transcribe(audio_file, language, use_sensevoice, use_whispe
         total_files = len(chopped_files)
         
         # Process all files with SenseVoice first
+        sensevoice_cache_hits = 0
         if use_sensevoice:
             status += f"🎙️ Processing with SenseVoiceSmall...\n\n"
             for i, audio_path in enumerate(chopped_files):
@@ -623,15 +811,20 @@ def process_chop_and_transcribe(audio_file, language, use_sensevoice, use_whispe
                 result = transcribe_single_audio_sensevoice(audio_path, language)
                 if result:
                     sensevoice_results.append(result)
-                    status += f"  ✅ SenseVoice: {result['transcription'][:80]}{'...' if len(result['transcription']) > 80 else ''}\n"
+                    if result.get('cache_hit', False):
+                        sensevoice_cache_hits += 1
+                        status += f"  💾 SenseVoice (cached): {result['transcription'][:80]}{'...' if len(result['transcription']) > 80 else ''}\n"
+                    else:
+                        status += f"  ✅ SenseVoice: {result['transcription'][:80]}{'...' if len(result['transcription']) > 80 else ''}\n"
                 else:
                     status += f"  ❌ SenseVoice: Failed\n"
                 
                 status += "\n"
             
-            status += f"✅ SenseVoice completed: {len(sensevoice_results)}/{total_files} files\n\n"
+            status += f"✅ SenseVoice completed: {len(sensevoice_results)}/{total_files} files ({sensevoice_cache_hits} from cache)\n\n"
         
         # Then process all files with Whisper-v3-Cantonese
+        whisperv3_cache_hits = 0
         if use_whisperv3_cantonese:
             status += f"🎙️ Processing with Whisper-v3-Cantonese...\n\n"
             for i, audio_path in enumerate(chopped_files):
@@ -643,13 +836,17 @@ def process_chop_and_transcribe(audio_file, language, use_sensevoice, use_whispe
                 result = transcribe_single_audio_whisperv3_cantonese(audio_path)
                 if result:
                     whisperv3_results.append(result)
-                    status += f"  ✅ Whisper-v3: {result['transcription'][:80]}{'...' if len(result['transcription']) > 80 else ''}\n"
+                    if result.get('cache_hit', False):
+                        whisperv3_cache_hits += 1
+                        status += f"  💾 Whisper-v3 (cached): {result['transcription'][:80]}{'...' if len(result['transcription']) > 80 else ''}\n"
+                    else:
+                        status += f"  ✅ Whisper-v3: {result['transcription'][:80]}{'...' if len(result['transcription']) > 80 else ''}\n"
                 else:
                     status += f"  ❌ Whisper-v3: Failed\n"
                 
                 status += "\n"
             
-            status += f"✅ Whisper-v3-Cantonese completed: {len(whisperv3_results)}/{total_files} files\n\n"
+            status += f"✅ Whisper-v3-Cantonese completed: {len(whisperv3_results)}/{total_files} files ({whisperv3_cache_hits} from cache)\n\n"
         
         end_time = time.time()
         processing_time = end_time - start_time
@@ -913,6 +1110,7 @@ def process_batch_transcription(audio_files, zip_file, link_or_path, language, u
         status += f"📝 Processing {total_files} audio file(s)...\n\n"
         
         # Process all files with SenseVoice first (for better model caching)
+        sensevoice_cache_hits = 0
         if use_sensevoice:
             status += f"🎙️ Processing with SenseVoiceSmall...\n\n"
             for i, audio_path in enumerate(audio_paths):
@@ -924,15 +1122,20 @@ def process_batch_transcription(audio_files, zip_file, link_or_path, language, u
                 result = transcribe_single_audio_sensevoice(audio_path, language)
                 if result:
                     sensevoice_results.append(result)
-                    status += f"  ✅ SenseVoice: {result['transcription'][:80]}{'...' if len(result['transcription']) > 80 else ''}\n"
+                    if result.get('cache_hit', False):
+                        sensevoice_cache_hits += 1
+                        status += f"  💾 SenseVoice (cached): {result['transcription'][:80]}{'...' if len(result['transcription']) > 80 else ''}\n"
+                    else:
+                        status += f"  ✅ SenseVoice: {result['transcription'][:80]}{'...' if len(result['transcription']) > 80 else ''}\n"
                 else:
                     status += f"  ❌ SenseVoice: Failed\n"
                 
                 status += "\n"
             
-            status += f"✅ SenseVoice completed: {len(sensevoice_results)}/{total_files} files\n\n"
+            status += f"✅ SenseVoice completed: {len(sensevoice_results)}/{total_files} files ({sensevoice_cache_hits} from cache)\n\n"
         
         # Then process all files with Whisper-v3-Cantonese (for better model caching)
+        whisperv3_cache_hits = 0
         if use_whisperv3_cantonese:
             status += f"🎙️ Processing with Whisper-v3-Cantonese...\n\n"
             for i, audio_path in enumerate(audio_paths):
@@ -944,13 +1147,17 @@ def process_batch_transcription(audio_files, zip_file, link_or_path, language, u
                 result = transcribe_single_audio_whisperv3_cantonese(audio_path)
                 if result:
                     whisperv3_results.append(result)
-                    status += f"  ✅ Whisper-v3: {result['transcription'][:80]}{'...' if len(result['transcription']) > 80 else ''}\n"
+                    if result.get('cache_hit', False):
+                        whisperv3_cache_hits += 1
+                        status += f"  💾 Whisper-v3 (cached): {result['transcription'][:80]}{'...' if len(result['transcription']) > 80 else ''}\n"
+                    else:
+                        status += f"  ✅ Whisper-v3: {result['transcription'][:80]}{'...' if len(result['transcription']) > 80 else ''}\n"
                 else:
                     status += f"  ❌ Whisper-v3: Failed\n"
                 
                 status += "\n"
             
-            status += f"✅ Whisper-v3-Cantonese completed: {len(whisperv3_results)}/{total_files} files\n\n"
+            status += f"✅ Whisper-v3-Cantonese completed: {len(whisperv3_results)}/{total_files} files ({whisperv3_cache_hits} from cache)\n\n"
         
         end_time = time.time()
         processing_time = end_time - start_time

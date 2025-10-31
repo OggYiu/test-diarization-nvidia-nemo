@@ -27,6 +27,9 @@ class StockInfo(BaseModel):
     confidence: str = Field(
         description="Confidence level: 'high', 'medium', or 'low'"
     )
+    relevance_score: int = Field(
+        description="How sure the conversation talks about this specific stock (0=not discussed, 1=mentioned briefly, 2=actively discussed/traded)"
+    )
     reasoning: Optional[str] = Field(
         default=None,
         description="Brief explanation of how the stock was identified or any corrections made"
@@ -75,7 +78,11 @@ DEFAULT_SYSTEM_MESSAGE = """你是一位精通粵語的香港股市分析專家�
 1. 識別所有提及的股票代號和名稱
 2. 修正任何可能的Speech-to-Text誤差
 3. 評估每個識別的置信度（high/medium/low）
-4. 提供簡要的推理解釋
+4. 評估對話與該股票的相關程度（relevance_score）：
+   - 0: 沒有實質討論（僅背景噪音或無關提及）
+   - 1: 簡短提及或詢問（例如：問價、一般查詢）
+   - 2: 積極討論或交易（例如：下單、詳細分析、交易確認）
+5. 提供簡要的推理解釋
 
 請以結構化的JSON格式返回結果。"""
 
@@ -192,10 +199,17 @@ def format_extraction_result(result: ConversationStockExtraction, model: str, st
                 "low": "⚠️"
             }.get(stock.confidence.lower(), "❓")
             
+            relevance_emoji = {
+                0: "⚫",  # Not discussed
+                1: "🔵",  # Mentioned briefly
+                2: "🟢"   # Actively discussed
+            }.get(stock.relevance_score, "❓")
+            
             output.append(f"   {i}. {confidence_emoji} 股票 #{i}")
             output.append(f"      • 股票代號: {stock.stock_number}")
             output.append(f"      • 股票名稱: {stock.stock_name}")
             output.append(f"      • 置信度: {stock.confidence.upper()}")
+            output.append(f"      • 相關程度: {relevance_emoji} {stock.relevance_score}/2")
             
             if stock.reasoning:
                 output.append(f"      • 推理: {stock.reasoning}")
@@ -386,7 +400,9 @@ def create_stt_stock_comparison_tab():
                 system_message_box = gr.Textbox(
                     label="系統訊息 (System Message)",
                     value=DEFAULT_SYSTEM_MESSAGE,
-                    lines=6,
+                    lines=15,
+                    max_lines=20,
+                    show_copy_button=True,
                 )
                 
                 with gr.Row():
