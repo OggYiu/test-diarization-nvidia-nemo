@@ -532,13 +532,6 @@ def create_stt_stock_comparison_tab():
                     info="All results combined into a single JSON structure"
                 )
         
-        # Example buttons
-        gr.Markdown("### 💡 示例 (Examples)")
-        
-        with gr.Row():
-            example_1 = gr.Button("示例 1: 騰訊交易對比", size="sm")
-            example_2 = gr.Button("示例 2: 多股票 STT 差異", size="sm")
-            example_3 = gr.Button("示例 3: 粵語變體對比", size="sm")
         
         # Connect the analyze button
         analyze_btn.click(
@@ -554,79 +547,5 @@ def create_stt_stock_comparison_tab():
             outputs=[results_box, json_box, combined_json_box],
         )
         
-        # Example button handlers
-        example_1.click(
-            fn=lambda: (
-                """券商：你好，請問需要什麼幫助？
-客戶：我想買騰訊
-券商：好的，七百號騰訊，買多少？
-客戶：一千股，市價買入
-券商：確認一下，七百號騰訊，買入一千股，市價，對嗎？
-客戶：對的，謝謝""",
-                """券商：你好，請問需要咩幫助？
-客戶：我想買騰訊
-券商：好嘅，七百號騰訊，買幾多？
-客戶：一千股，市價買入
-券商：確認一下，七百號騰訊，買入一千股，市價，啱唔啱？
-客戶：啱，謝謝"""
-            ),
-            outputs=[transcription1_box, transcription2_box],
-        )
-        
-        example_2.click(
-            fn=lambda: (
-                """客戶：早晨，我想問下小米同比亞迪今日走勢
-券商：你好！小米一八一零今日升咗2%，比亞迪二一一一跌咗1%
-客戶：咁我想沽五百股比亞迪，再入一千股小米
-券商：好的，確認一下：沽出比亞迪二一一一五百股，買入小米一八一零一千股，啱唔啱？
-客戶：啱，就咁做""",
-                """客戶：早晨，我想問下小米同比亞迪今日走勢
-券商：你好！小米18一零今日升左2%，比亞迪21一一跌左1%
-客戶：咁我想沽五百股比亞迪，再入一千股小米
-券商：好嘅，確認一下：沽出比亞迪21一一五百股，買入小米18一零一千股，啱唔啱？
-客戶：啱，就咁做"""
-            ),
-            outputs=[transcription1_box, transcription2_box],
-        )
-        
-        example_3.click(
-            fn=lambda: (
-                """客戶：我想買招商局置地
-券商：招商局置地，係一百一三八號？
-客戶：係呀
-券商：買幾多？
-客戶：五百股""",
-                """客戶：我想買招商局置地
-券商：招商局置地，係一八一三八號？
-客戶：係呀
-券商：買幾多？
-客戶：五百股"""
-            ),
-            outputs=[transcription1_box, transcription2_box],
-        )
-        
-        gr.Markdown(
-            """
-            ---
-            ### 📌 使用說明 (Instructions)
-            
-            1. **輸入轉錄**: 將兩個不同 STT 模型的轉錄結果分別貼入兩個文本框
-            2. **選擇 LLM**: 勾選一個或多個 LLM 模型進行股票提取分析
-            3. **調整設置**: 可選調整系統訊息、Temperature 等參數
-            4. **開始分析**: 點擊「Analyze & Compare」按鈕
-            5. **查看對比**: 系統會並行處理所有組合，顯示詳細對比結果
-            6. **導出數據**: 可從「Combined JSON Output」複製統一的 JSON 結構
-            
-            ### 🎯 功能特點 (Features)
-            
-            - 🔄 **雙轉錄對比**: 同時處理兩個不同 STT 模型的輸出
-            - 🤖 **多 LLM 分析**: 使用多個 LLM 模型進行交叉驗證
-            - ⚡ **並行處理**: 所有 LLM 查詢並行執行，提高效率
-            - 📊 **結構化輸出**: 使用 Pydantic 保證數據格式一致
-            - 🔍 **智能修正**: 自動識別並修正 STT 錯誤
-            - 📈 **置信度評估**: 每個識別結果都有置信度評分
-            - 📦 **統一 JSON**: 所有結果組合成單一 JSON 文件，便於後續處理
-            """
-        )
 
 
