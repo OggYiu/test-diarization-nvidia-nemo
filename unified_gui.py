@@ -22,8 +22,8 @@ from tabs import (
     # create_file_metadata_tab,
     # create_diarization_tab,
     create_stt_tab,
-    create_llm_analysis_tab,
-    create_speaker_separation_tab,
+    # create_llm_analysis_tab,
+    # create_speaker_separation_tab,
     # create_audio_enhancement_tab,
     # create_llm_comparison_tab,
     # create_multi_llm_tab,
@@ -49,8 +49,8 @@ def create_unified_interface():
             # create_file_metadata_tab()
             # create_diarization_tab()
             create_stt_tab()
-            create_llm_analysis_tab()
-            create_speaker_separation_tab()
+            # create_llm_analysis_tab()
+            # create_speaker_separation_tab()
             # create_audio_enhancement_tab()
             # create_llm_comparison_tab()
             # create_multi_llm_tab()

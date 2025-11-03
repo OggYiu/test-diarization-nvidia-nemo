@@ -1,14 +1,16 @@
 """
 Tab: STT & Stock Extraction Comparison
-Compare transcriptions from different STT models and extract stock information using multiple LLMs
+Compare up to three transcriptions from different STT models and extract stock information using multiple LLMs.
+Empty transcriptions are automatically skipped to improve performance.
 """
 
 import json
 import traceback
+import logging
+import time
 from typing import List, Optional
 from datetime import datetime
 import gradio as gr
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pydantic import BaseModel, Field
 from langchain_ollama import ChatOllama
 from langchain_core.output_parsers import PydanticOutputParser
@@ -227,17 +229,19 @@ def format_extraction_result(result: ConversationStockExtraction, model: str, st
 def process_transcriptions(
     transcription1: str,
     transcription2: str,
+    transcription3: str,
     selected_llms: list[str],
     system_message: str,
     ollama_url: str,
     temperature: float,
 ) -> tuple[str, str, str]:
     """
-    Process both transcriptions with selected LLMs and compare results.
+    Process all three transcriptions with selected LLMs and compare results.
     
     Args:
         transcription1: First transcription text
         transcription2: Second transcription text
+        transcription3: Third transcription text
         selected_llms: List of selected LLM names
         system_message: System message for the LLMs
         ollama_url: Ollama server URL
@@ -247,12 +251,14 @@ def process_transcriptions(
         tuple[str, str, str]: (formatted_comparison, raw_json_collection, combined_json)
     """
     try:
-        # Validate inputs
-        if not transcription1 or not transcription1.strip():
-            return "❌ Error: Please provide transcription 1", "", ""
+        # Check which transcriptions are provided
+        has_trans1 = bool(transcription1 and transcription1.strip())
+        has_trans2 = bool(transcription2 and transcription2.strip())
+        has_trans3 = bool(transcription3 and transcription3.strip())
         
-        if not transcription2 or not transcription2.strip():
-            return "❌ Error: Please provide transcription 2", "", ""
+        # Validate that at least one transcription is provided
+        if not (has_trans1 or has_trans2 or has_trans3):
+            return "❌ Error: Please provide at least one transcription", "", ""
         
         if not selected_llms or len(selected_llms) == 0:
             return "❌ Error: Please select at least one LLM", "", ""
@@ -263,16 +269,20 @@ def process_transcriptions(
         # Results storage
         results_trans1 = {}
         results_trans2 = {}
+        results_trans3 = {}
         raw_jsons = {}
         
-        # Process both transcriptions with all selected LLMs concurrently
-        with ThreadPoolExecutor(max_workers=len(selected_llms) * 2) as executor:
-            futures = {}
-            
-            # Submit tasks for transcription 1
-            for model in selected_llms:
-                future = executor.submit(
-                    extract_stocks_with_single_llm,
+        # Process one LLM at a time to avoid overwhelming VRAM
+        # For each LLM, process all transcriptions sequentially
+        for model in selected_llms:
+            # Process transcription 1 (only if provided)
+            if has_trans1:
+                msg = f"Starting analysis for STT Model 1 with LLM: {model}"
+                logging.info(msg)
+                print(msg)
+                start_time = time.time()
+                
+                result_model, formatted_result, raw_json = extract_stocks_with_single_llm(
                     model,
                     transcription1,
                     system_message,
@@ -280,12 +290,23 @@ def process_transcriptions(
                     temperature,
                     "STT Model 1"
                 )
-                futures[future] = (model, 1)
+                
+                elapsed_time = time.time() - start_time
+                msg = f"Completed analysis for STT Model 1 with LLM: {model} - Time taken: {elapsed_time:.2f} seconds"
+                logging.info(msg)
+                print(msg)
+                
+                results_trans1[model] = formatted_result
+                raw_jsons[f"{model}_trans1"] = raw_json
             
-            # Submit tasks for transcription 2
-            for model in selected_llms:
-                future = executor.submit(
-                    extract_stocks_with_single_llm,
+            # Process transcription 2 (only if provided)
+            if has_trans2:
+                msg = f"Starting analysis for STT Model 2 with LLM: {model}"
+                logging.info(msg)
+                print(msg)
+                start_time = time.time()
+                
+                result_model, formatted_result, raw_json = extract_stocks_with_single_llm(
                     model,
                     transcription2,
                     system_message,
@@ -293,25 +314,56 @@ def process_transcriptions(
                     temperature,
                     "STT Model 2"
                 )
-                futures[future] = (model, 2)
-            
-            # Collect results as they complete
-            for future in as_completed(futures):
-                model, trans_num = futures[future]
-                result_model, formatted_result, raw_json = future.result()
                 
-                if trans_num == 1:
-                    results_trans1[model] = formatted_result
-                    raw_jsons[f"{model}_trans1"] = raw_json
-                else:
-                    results_trans2[model] = formatted_result
-                    raw_jsons[f"{model}_trans2"] = raw_json
+                elapsed_time = time.time() - start_time
+                msg = f"Completed analysis for STT Model 2 with LLM: {model} - Time taken: {elapsed_time:.2f} seconds"
+                logging.info(msg)
+                print(msg)
+                
+                results_trans2[model] = formatted_result
+                raw_jsons[f"{model}_trans2"] = raw_json
+            
+            # Process transcription 3 (only if provided)
+            if has_trans3:
+                msg = f"Starting analysis for STT Model 3 with LLM: {model}"
+                logging.info(msg)
+                print(msg)
+                start_time = time.time()
+                
+                result_model, formatted_result, raw_json = extract_stocks_with_single_llm(
+                    model,
+                    transcription3,
+                    system_message,
+                    ollama_url,
+                    temperature,
+                    "STT Model 3"
+                )
+                
+                elapsed_time = time.time() - start_time
+                msg = f"Completed analysis for STT Model 3 with LLM: {model} - Time taken: {elapsed_time:.2f} seconds"
+                logging.info(msg)
+                print(msg)
+                
+                results_trans3[model] = formatted_result
+                raw_jsons[f"{model}_trans3"] = raw_json
         
         # Format output
         output_parts = []
         output_parts.append("=" * 80)
         output_parts.append("🔬 STT & STOCK EXTRACTION COMPARISON")
         output_parts.append(f"Selected LLMs: {len(selected_llms)}")
+        
+        # Show which transcriptions are active
+        active_trans_list = []
+        if has_trans1:
+            active_trans_list.append("Transcription 1")
+        if has_trans2:
+            active_trans_list.append("Transcription 2")
+        if has_trans3:
+            active_trans_list.append("Transcription 3")
+        
+        output_parts.append(f"Active Transcriptions: {len(active_trans_list)}/3")
+        output_parts.append(f"Analyzing: {', '.join(active_trans_list)}")
         output_parts.append("=" * 80)
         output_parts.append("")
         
@@ -321,23 +373,35 @@ def process_transcriptions(
             output_parts.append("=" * 80)
             output_parts.append("")
             
-            # Results from transcription 1
-            output_parts.append("┌─ 📄 TRANSCRIPTION 1 RESULTS")
-            output_parts.append("│")
-            result1 = results_trans1.get(model, "❌ No response")
-            for line in result1.split("\n"):
-                output_parts.append(f"│  {line}")
-            output_parts.append("└" + "─" * 79)
-            output_parts.append("")
+            # Results from transcription 1 (only if provided)
+            if has_trans1:
+                output_parts.append("┌─ 📄 TRANSCRIPTION 1 RESULTS")
+                output_parts.append("│")
+                result1 = results_trans1.get(model, "❌ No response")
+                for line in result1.split("\n"):
+                    output_parts.append(f"│  {line}")
+                output_parts.append("└" + "─" * 79)
+                output_parts.append("")
             
-            # Results from transcription 2
-            output_parts.append("┌─ 📄 TRANSCRIPTION 2 RESULTS")
-            output_parts.append("│")
-            result2 = results_trans2.get(model, "❌ No response")
-            for line in result2.split("\n"):
-                output_parts.append(f"│  {line}")
-            output_parts.append("└" + "─" * 79)
-            output_parts.append("")
+            # Results from transcription 2 (only if provided)
+            if has_trans2:
+                output_parts.append("┌─ 📄 TRANSCRIPTION 2 RESULTS")
+                output_parts.append("│")
+                result2 = results_trans2.get(model, "❌ No response")
+                for line in result2.split("\n"):
+                    output_parts.append(f"│  {line}")
+                output_parts.append("└" + "─" * 79)
+                output_parts.append("")
+            
+            # Results from transcription 3 (only if provided)
+            if has_trans3:
+                output_parts.append("┌─ 📄 TRANSCRIPTION 3 RESULTS")
+                output_parts.append("│")
+                result3 = results_trans3.get(model, "❌ No response")
+                for line in result3.split("\n"):
+                    output_parts.append(f"│  {line}")
+                output_parts.append("└" + "─" * 79)
+                output_parts.append("")
         
         output_parts.append("=" * 80)
         output_parts.append("✓ All comparisons completed")
@@ -381,13 +445,18 @@ def process_transcriptions(
         # Merge stocks and calculate average relevance_score
         merged_stocks = []
         
+        # Calculate total number of analyses (should match len(raw_jsons))
+        total_analyses = len(raw_jsons)
+        
         for stock_number, stock_list in stocks_dict.items():
             if not stock_list:
                 continue
             
-            # Calculate average relevance_score
+            # Calculate average relevance_score across ALL analyses
+            # (not just the ones where the stock appeared)
             relevance_scores = [s.get("relevance_score", 0) for s in stock_list]
-            avg_relevance_score = sum(relevance_scores) / len(relevance_scores) if relevance_scores else 0
+            total_score = sum(relevance_scores)
+            avg_relevance_score = total_score / total_analyses if total_analyses > 0 else 0
             
             # Use the first stock's data as base
             merged_stock = {
@@ -443,7 +512,7 @@ def create_stt_stock_comparison_tab():
     """Create and return the STT & Stock Comparison tab"""
     with gr.Tab("9️⃣ STT Stock Comparison"):
         gr.Markdown("### Compare Transcriptions & Extract Stock Information")
-        gr.Markdown("Input two different transcriptions from different STT models and compare stock extraction results using multiple LLMs.")
+        gr.Markdown("Input up to three different transcriptions from different STT models and compare stock extraction results using multiple LLMs. Empty transcriptions will be skipped automatically.")
         
         with gr.Row():
             with gr.Column(scale=1):
@@ -454,12 +523,21 @@ def create_stt_stock_comparison_tab():
                     label="🎤 Transcription 1 (STT Model 1)",
                     placeholder="請輸入第一個 STT 模型的轉錄文本...\n\n例如：\n券商：你好，請問需要什麼幫助？\n客戶：我想買騰訊\n券商：好的，七百號，買多少？",
                     lines=10,
+                    show_copy_button=True,
                 )
                 
                 transcription2_box = gr.Textbox(
                     label="🎤 Transcription 2 (STT Model 2)",
                     placeholder="請輸入第二個 STT 模型的轉錄文本...\n\n例如：\n券商：你好，請問需要咩幫助？\n客戶：我想買騰訊\n券商：好嘅，七百號，買幾多？",
                     lines=10,
+                    show_copy_button=True,
+                )
+                
+                transcription3_box = gr.Textbox(
+                    label="🎤 Transcription 3 (STT Model 3)",
+                    placeholder="請輸入第三個 STT 模型的轉錄文本...\n\n例如：\n券商：你好，請問需要咩幫助？\n客戶：我想買騰訊\n券商：好嘅，七百號，買幾多？",
+                    lines=10,
+                    show_copy_button=True,
                 )
                 
                 gr.Markdown("#### 🤖 Select LLMs for Analysis")
@@ -539,6 +617,7 @@ def create_stt_stock_comparison_tab():
             inputs=[
                 transcription1_box,
                 transcription2_box,
+                transcription3_box,
                 llm_checkboxes,
                 system_message_box,
                 ollama_url_box,
