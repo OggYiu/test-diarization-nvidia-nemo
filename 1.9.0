@@ -1,0 +1,10 @@
+Collecting sherpa-onnx
+  Downloading sherpa_onnx-1.12.15-cp312-cp312-win_amd64.whl.metadata (44 kB)
+Collecting sherpa-onnx-core==1.12.15 (from sherpa-onnx)
+  Using cached sherpa_onnx_core-1.12.15-py3-none-win_amd64.whl.metadata (533 bytes)
+Downloading sherpa_onnx-1.12.15-cp312-cp312-win_amd64.whl (1.9 MB)
+   ---------------------------------------- 1.9/1.9 MB 10.6 MB/s  0:00:00
+Using cached sherpa_onnx_core-1.12.15-py3-none-win_amd64.whl (11.7 MB)
+Installing collected packages: sherpa-onnx-core, sherpa-onnx
+
+Successfully installed sherpa-onnx-1.12.15 sherpa-onnx-core-1.12.15

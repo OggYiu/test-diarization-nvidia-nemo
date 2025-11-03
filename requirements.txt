@@ -23,6 +23,8 @@ webdataset>=0.2.0
 
 # Speech Recognition & ASR
 funasr>=1.0.0
+sherpa-onnx>=1.9.0
+resampy>=0.4.2
 
 # LLM Integration
 langchain-ollama>=0.1.0
