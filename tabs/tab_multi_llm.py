@@ -15,7 +15,7 @@ from langchain_ollama import ChatOllama
 LLM_OPTIONS = [
     "qwen3:32b",
     "gpt-oss:20b",
-    "gemma3-27b",
+    "gemma3:27b",
     "deepseek-r1:32b",
     "deepseek-r1:70b",
 ]

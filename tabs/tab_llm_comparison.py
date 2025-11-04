@@ -12,18 +12,8 @@ import gradio as gr
 
 from langchain_ollama import ChatOllama
 
-
-# Common model options
-MODEL_OPTIONS = [
-    "qwen3:32b",
-    "gpt-oss:20b",
-    "gemma3-27b",
-    "deepseek-r1:32b",
-    "deepseek-r1:70b",
-]
-
-DEFAULT_MODEL = MODEL_OPTIONS[0]
-DEFAULT_OLLAMA_URL = "http://localhost:11434"
+# Import centralized model configuration
+from model_config import MODEL_OPTIONS, DEFAULT_MODEL, DEFAULT_OLLAMA_URL
 DEFAULT_SYSTEM_MESSAGE = (
     "你是一位精通粵語以及香港股市的分析師。請用繁體中文回應，"
     "並從下方對話中判斷誰是券商、誰是客戶，整理最終下單（股票代號、買/賣、價格、數量），"

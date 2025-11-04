@@ -10,10 +10,19 @@ import logging
 import time
 from typing import List, Optional
 from datetime import datetime
+from collections import Counter
 import gradio as gr
 from pydantic import BaseModel, Field
 from langchain_ollama import ChatOllama
 from langchain_core.output_parsers import PydanticOutputParser
+
+# Import stock verification functionality
+from stock_verifier_module.stock_verifier_improved import (
+    get_vector_store,
+    verify_and_correct_stock,
+    StockCorrectionResult,
+    SearchStrategy,
+)
 
 
 # ============================================================================
@@ -28,6 +37,10 @@ class StockInfo(BaseModel):
     stock_name: str = Field(
         description="The stock name in Traditional Chinese (e.g., '騰訊', '小米', '招商局置地')"
     )
+    original_word: Optional[str] = Field(
+        default=None,
+        description="The exact original word/phrase from the transcription (e.g., '金碟' if it was misheard as '金蝶'). Only include if different from stock_name."
+    )
     confidence: str = Field(
         description="Confidence level: 'high', 'medium', or 'low'"
     )
@@ -37,6 +50,18 @@ class StockInfo(BaseModel):
     reasoning: Optional[str] = Field(
         default=None,
         description="Brief explanation of how the stock was identified or any corrections made"
+    )
+    corrected_stock_name: Optional[str] = Field(
+        default=None,
+        description="Stock name after vector store correction (if different from original)"
+    )
+    corrected_stock_number: Optional[str] = Field(
+        default=None,
+        description="Stock number after vector store correction (if different from original)"
+    )
+    correction_confidence: Optional[float] = Field(
+        default=None,
+        description="Confidence score for the correction from vector store (0.0-1.0)"
     )
 
 
@@ -57,11 +82,10 @@ class ConversationStockExtraction(BaseModel):
 LLM_OPTIONS = [
     "qwen3:32b",
     "gpt-oss:20b",
-    "gemma3-27b",
+    "gemma3:27b",
     "deepseek-r1:32b",
     "deepseek-r1:70b",
     "qwen2.5:72b",
-    "llama3.3:70b",
 ]
 
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
@@ -78,16 +102,23 @@ DEFAULT_SYSTEM_MESSAGE = """你是一位精通粵語的香港股市分析專家�
 - 誤認: 孤/沽 → 正確: 賣出
 - 誤認: 轮 → 正確: 窩輪
 - 誤認: 星 → 正確: 升
+- 誤認: 號 → 正確: 毫
 
 **你的目標:**
 1. 識別所有提及的股票代號和名稱
 2. 修正任何可能的Speech-to-Text誤差
-3. 評估每個識別的置信度（high/medium/low）
-4. 評估對話與該股票的相關程度（relevance_score）：
+3. **如果你修正了股票名稱（即轉錄文本中的詞與正確股票名稱不同），請在 original_word 欄位中提供轉錄文本中的原始詞語**
+4. 評估每個識別的置信度（high/medium/low）
+5. 評估對話與該股票的相關程度（relevance_score）：
    - 0: 沒有實質討論（僅背景噪音或無關提及）
    - 1: 簡短提及或詢問（例如：問價、一般查詢）
    - 2: 積極討論或交易（例如：下單、詳細分析、交易確認）
-5. 提供簡要的推理解釋
+6. 提供簡要的推理解釋
+
+**關於 original_word 欄位:**
+- 只在你修正了STT誤差時才填寫此欄位
+- 例如：如果轉錄文本說「金碟」但正確的是「金蝶國際」，則 original_word 應為「金碟」
+- 如果轉錄文本本身就是正確的，則省略此欄位
 
 請以結構化的JSON格式返回結果。"""
 
@@ -103,6 +134,7 @@ def extract_stocks_with_single_llm(
     ollama_url: str,
     temperature: float,
     stt_source: str,
+    use_vector_correction: bool = True,
 ) -> tuple[str, str, str]:
     """
     Extract stock information using a single LLM.
@@ -114,6 +146,7 @@ def extract_stocks_with_single_llm(
         ollama_url: Ollama server URL
         temperature: Temperature for generation
         stt_source: Label for the STT source (for display)
+        use_vector_correction: Whether to use vector store for stock name correction
         
     Returns:
         tuple[str, str, str]: (model_name, formatted_result, raw_json)
@@ -156,11 +189,54 @@ def extract_stocks_with_single_llm(
         try:
             parsed_result: ConversationStockExtraction = parser.parse(response_content)
             
+            # Apply vector store correction if enabled
+            if use_vector_correction:
+                vector_store = get_vector_store()
+                if vector_store.initialize():
+                    corrected_stocks = []
+                    for stock in parsed_result.stocks:
+                        # Use the new optimized verification function
+                        correction_result = verify_and_correct_stock(
+                            stock_name=stock.stock_name,
+                            stock_code=stock.stock_number,
+                            vector_store=vector_store,
+                            strategy=SearchStrategy.OPTIMIZED,
+                        )
+                        
+                        # Always populate corrected fields
+                        if correction_result.correction_applied:
+                            # Correction was applied - use corrected values
+                            stock.corrected_stock_name = correction_result.corrected_stock_name or stock.stock_name
+                            stock.corrected_stock_number = correction_result.corrected_stock_code or stock.stock_number
+                            stock.correction_confidence = correction_result.confidence
+                            
+                            # Update reasoning
+                            if stock.reasoning:
+                                stock.reasoning = f"{stock.reasoning} | {correction_result.reasoning}"
+                            else:
+                                stock.reasoning = correction_result.reasoning
+                        else:
+                            # No correction needed - use original values with 1.0 confidence
+                            stock.corrected_stock_name = stock.stock_name
+                            stock.corrected_stock_number = stock.stock_number
+                            stock.correction_confidence = 1.0
+                        
+                        corrected_stocks.append(stock)
+                    
+                    parsed_result.stocks = corrected_stocks
+            else:
+                # Vector correction disabled - still populate with original values
+                for stock in parsed_result.stocks:
+                    stock.corrected_stock_name = stock.stock_name
+                    stock.corrected_stock_number = stock.stock_number
+                    stock.correction_confidence = 1.0
+            
             # Format the result for display
             formatted_output = format_extraction_result(parsed_result, model, stt_source)
             
             # Also return the raw JSON for reference
-            raw_json = parsed_result.model_dump_json(indent=2, exclude_none=True)
+            # Note: exclude_none=False ensures corrected_stock_name and corrected_stock_number are always present
+            raw_json = parsed_result.model_dump_json(indent=2, exclude_none=False)
             
             return (model, formatted_output, raw_json)
             
@@ -213,6 +289,21 @@ def format_extraction_result(result: ConversationStockExtraction, model: str, st
             output.append(f"   {i}. {confidence_emoji} 股票 #{i}")
             output.append(f"      • 股票代號: {stock.stock_number}")
             output.append(f"      • 股票名稱: {stock.stock_name}")
+            
+            # Show original word if available
+            if stock.original_word:
+                output.append(f"      • 原始詞語: {stock.original_word}")
+            
+            # Show corrections if available
+            if stock.corrected_stock_number or stock.corrected_stock_name:
+                output.append(f"      🔧 修正後:")
+                if stock.corrected_stock_number:
+                    output.append(f"         ◦ 股票代號: {stock.corrected_stock_number}")
+                if stock.corrected_stock_name:
+                    output.append(f"         ◦ 股票名稱: {stock.corrected_stock_name}")
+                if stock.correction_confidence:
+                    output.append(f"         ◦ 修正信心: {stock.correction_confidence:.2%}")
+            
             output.append(f"      • 置信度: {stock.confidence.upper()}")
             output.append(f"      • 相關程度: {relevance_emoji} {stock.relevance_score}/2")
             
@@ -234,6 +325,7 @@ def process_transcriptions(
     system_message: str,
     ollama_url: str,
     temperature: float,
+    use_vector_correction: bool = True,
 ) -> tuple[str, str, str]:
     """
     Process all three transcriptions with selected LLMs and compare results.
@@ -246,6 +338,7 @@ def process_transcriptions(
         system_message: System message for the LLMs
         ollama_url: Ollama server URL
         temperature: Temperature parameter
+        use_vector_correction: Whether to use vector store for stock name correction
         
     Returns:
         tuple[str, str, str]: (formatted_comparison, raw_json_collection, combined_json)
@@ -288,7 +381,8 @@ def process_transcriptions(
                     system_message,
                     ollama_url,
                     temperature,
-                    "STT Model 1"
+                    "STT Model 1",
+                    use_vector_correction
                 )
                 
                 elapsed_time = time.time() - start_time
@@ -312,7 +406,8 @@ def process_transcriptions(
                     system_message,
                     ollama_url,
                     temperature,
-                    "STT Model 2"
+                    "STT Model 2",
+                    use_vector_correction
                 )
                 
                 elapsed_time = time.time() - start_time
@@ -336,7 +431,8 @@ def process_transcriptions(
                     system_message,
                     ollama_url,
                     temperature,
-                    "STT Model 3"
+                    "STT Model 3",
+                    use_vector_correction
                 )
                 
                 elapsed_time = time.time() - start_time
@@ -465,6 +561,24 @@ def process_transcriptions(
                 "relevance_score": round(avg_relevance_score, 2),
             }
             
+            # Include original_word if present (use first non-empty one)
+            original_words = [s.get("original_word", "") for s in stock_list if s.get("original_word")]
+            if original_words:
+                # Use the most common original word, or first if tied
+                word_counts = Counter(original_words)
+                most_common_word = word_counts.most_common(1)[0][0]
+                merged_stock["original_word"] = most_common_word
+            
+            # Include corrected stock information (always populate, use first available or original values)
+            corrected_names = [s.get("corrected_stock_name") for s in stock_list if s.get("corrected_stock_name")]
+            corrected_numbers = [s.get("corrected_stock_number") for s in stock_list if s.get("corrected_stock_number")]
+            correction_confidences = [s.get("correction_confidence") for s in stock_list if s.get("correction_confidence")]
+            
+            # Always include these fields - use corrected values if available, otherwise use original values
+            merged_stock["corrected_stock_number"] = corrected_numbers[0] if corrected_numbers else stock_number
+            merged_stock["corrected_stock_name"] = corrected_names[0] if corrected_names else stock_list[0].get("stock_name", "")
+            merged_stock["correction_confidence"] = correction_confidences[0] if correction_confidences else 1.0
+            
             # Determine confidence - use the most common one, or highest if tied
             confidences = [s.get("confidence", "low").lower() for s in stock_list]
             confidence_priority = {"high": 3, "medium": 2, "low": 1}
@@ -513,6 +627,7 @@ def create_stt_stock_comparison_tab():
     with gr.Tab("9️⃣ STT Stock Comparison"):
         gr.Markdown("### Compare Transcriptions & Extract Stock Information")
         gr.Markdown("Input up to three different transcriptions from different STT models and compare stock extraction results using multiple LLMs. Empty transcriptions will be skipped automatically.")
+        gr.Markdown("**🔧 New Feature**: Enable Vector Store Correction to automatically correct stock names that may have STT errors by matching against your Milvus stock database.")
         
         with gr.Row():
             with gr.Column(scale=1):
@@ -550,6 +665,12 @@ def create_stt_stock_comparison_tab():
                 )
                 
                 gr.Markdown("#### ⚙️ Advanced Settings")
+                
+                use_vector_correction_checkbox = gr.Checkbox(
+                    label="🔧 Enable Vector Store Correction",
+                    value=True,
+                    info="Use Milvus vector store to correct stock names that may have STT errors"
+                )
                 
                 system_message_box = gr.Textbox(
                     label="系統訊息 (System Message)",
@@ -622,6 +743,7 @@ def create_stt_stock_comparison_tab():
                 system_message_box,
                 ollama_url_box,
                 temperature_slider,
+                use_vector_correction_checkbox,
             ],
             outputs=[results_box, json_box, combined_json_box],
         )

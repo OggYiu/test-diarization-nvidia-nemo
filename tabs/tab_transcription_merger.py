@@ -7,18 +7,8 @@ import traceback
 import gradio as gr
 from langchain_ollama import ChatOllama
 
-
-# Model options
-MODEL_OPTIONS = [
-    "qwen3:32b",
-    "gpt-oss:20b",
-    "gemma3-27b",
-    "deepseek-r1:32b",
-    "deepseek-r1:70b",
-]
-
-DEFAULT_MODEL = MODEL_OPTIONS[0]
-DEFAULT_OLLAMA_URL = "http://localhost:11434"
+# Import centralized model configuration
+from model_config import MODEL_OPTIONS, DEFAULT_MODEL, DEFAULT_OLLAMA_URL
 
 # Default system message for transcription merging
 DEFAULT_SYSTEM_MESSAGE = """你是一位專業的語音轉文字分析專家，精通粵語和繁體中文。

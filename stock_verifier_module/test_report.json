@@ -1,0 +1,248 @@
+{
+  "timestamp": "2025-11-04T13:32:35.151350",
+  "summary": {
+    "total_tests": 7,
+    "passed": 7,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 0,
+    "pass_rate": 100.0,
+    "execution_time_ms": 7778.073
+  },
+  "results": [
+    {
+      "test_id": "TC001",
+      "description": "騰訊認購證 - exact code match priority test",
+      "status": "[PASSED]",
+      "input_data": {
+        "stock_code": "18138",
+        "stock_name": "騰訊升認購證"
+      },
+      "expected": {
+        "stock_code": "18138",
+        "stock_name": "騰訊摩通六一購B"
+      },
+      "actual": {
+        "stock_code": "18138",
+        "stock_name": "騰訊摩通六一購B"
+      },
+      "correction_result": {
+        "original_stock_name": "騰訊升認購證",
+        "original_stock_code": "18138",
+        "corrected_stock_name": "騰訊摩通六一購B",
+        "corrected_stock_code": null,
+        "confidence": 0.7,
+        "correction_applied": true,
+        "confidence_level": "none",
+        "reasoning": "exact_code_unverified_name match (70.0% confidence): 名稱: 騰訊升認購證 → 騰訊摩通六一購B",
+        "search_strategy": "optimized"
+      },
+      "error_message": null,
+      "execution_time_ms": 2401.3469999999998,
+      "tags": [
+        "warrant",
+        "exact_code_match",
+        "critical"
+      ]
+    },
+    {
+      "test_id": "TC002",
+      "description": "騰訊控股 - basic stock lookup",
+      "status": "[PASSED]",
+      "input_data": {
+        "stock_code": "700",
+        "stock_name": "騰訊"
+      },
+      "expected": {
+        "stock_code": "00700",
+        "stock_name": "騰訊控股"
+      },
+      "actual": {
+        "stock_code": "00700",
+        "stock_name": "騰訊控股"
+      },
+      "correction_result": {
+        "original_stock_name": "騰訊",
+        "original_stock_code": "00700",
+        "corrected_stock_name": "騰訊控股",
+        "corrected_stock_code": null,
+        "confidence": 0.95,
+        "correction_applied": true,
+        "confidence_level": "none",
+        "reasoning": "exact_code_similar_name match (95.0% confidence): 名稱: 騰訊 → 騰訊控股",
+        "search_strategy": "optimized"
+      },
+      "error_message": null,
+      "execution_time_ms": 310.74800000000005,
+      "tags": [
+        "basic",
+        "blue_chip"
+      ]
+    },
+    {
+      "test_id": "TC003",
+      "description": "小米集團 - basic stock lookup",
+      "status": "[PASSED]",
+      "input_data": {
+        "stock_code": "1810",
+        "stock_name": "小米"
+      },
+      "expected": {
+        "stock_code": "01810",
+        "stock_name": "小米集團－Ｗ"
+      },
+      "actual": {
+        "stock_code": "01810",
+        "stock_name": "小米集團－Ｗ"
+      },
+      "correction_result": {
+        "original_stock_name": "小米",
+        "original_stock_code": "01810",
+        "corrected_stock_name": "小米集團－Ｗ",
+        "corrected_stock_code": null,
+        "confidence": 0.95,
+        "correction_applied": true,
+        "confidence_level": "none",
+        "reasoning": "exact_code_similar_name match (95.0% confidence): 名稱: 小米 → 小米集團－Ｗ",
+        "search_strategy": "optimized"
+      },
+      "error_message": null,
+      "execution_time_ms": 315.524,
+      "tags": [
+        "basic",
+        "tech"
+      ]
+    },
+    {
+      "test_id": "TC004",
+      "description": "Code only lookup - 騰訊",
+      "status": "[PASSED]",
+      "input_data": {
+        "stock_code": "700",
+        "stock_name": null
+      },
+      "expected": {
+        "stock_code": "00700",
+        "stock_name": "騰訊控股"
+      },
+      "actual": {
+        "stock_code": "00700",
+        "stock_name": "騰訊控股"
+      },
+      "correction_result": {
+        "original_stock_name": null,
+        "original_stock_code": "00700",
+        "corrected_stock_name": "騰訊控股",
+        "corrected_stock_code": null,
+        "confidence": 0.95,
+        "correction_applied": true,
+        "confidence_level": "none",
+        "reasoning": "exact_code_similar_name match (95.0% confidence): 名稱: None → 騰訊控股",
+        "search_strategy": "optimized"
+      },
+      "error_message": null,
+      "execution_time_ms": 303.29499999999996,
+      "tags": [
+        "code_only"
+      ]
+    },
+    {
+      "test_id": "TC005",
+      "description": "Name only lookup - 騰訊",
+      "status": "[PASSED]",
+      "input_data": {
+        "stock_code": null,
+        "stock_name": "騰訊控股"
+      },
+      "expected": {
+        "stock_code": "00700",
+        "stock_name": "騰訊控股"
+      },
+      "actual": {
+        "stock_code": "00700",
+        "stock_name": "騰訊控股"
+      },
+      "correction_result": {
+        "original_stock_name": "騰訊控股",
+        "original_stock_code": null,
+        "corrected_stock_name": null,
+        "corrected_stock_code": "00700",
+        "confidence": 0.9999,
+        "correction_applied": true,
+        "confidence_level": "none",
+        "reasoning": "semantic match (100.0% confidence): 代號: N/A → 00700",
+        "search_strategy": "optimized"
+      },
+      "error_message": null,
+      "execution_time_ms": 707.7470000000001,
+      "tags": [
+        "name_only"
+      ]
+    },
+    {
+      "test_id": "TC006",
+      "description": "STT error - 泡泡沬特 (should be 瑪)",
+      "status": "[PASSED]",
+      "input_data": {
+        "stock_code": null,
+        "stock_name": "泡泡沬特"
+      },
+      "expected": {
+        "stock_code": "9992",
+        "stock_name": "泡泡瑪特"
+      },
+      "actual": {
+        "stock_code": "09992",
+        "stock_name": "泡泡瑪特"
+      },
+      "correction_result": {
+        "original_stock_name": "泡泡沬特",
+        "original_stock_code": null,
+        "corrected_stock_name": "泡泡瑪特",
+        "corrected_stock_code": "09992",
+        "confidence": 0.8,
+        "correction_applied": true,
+        "confidence_level": "none",
+        "reasoning": "semantic match (80.0% confidence): 名稱: 泡泡沬特 → 泡泡瑪特; 代號: N/A → 09992",
+        "search_strategy": "optimized"
+      },
+      "error_message": null,
+      "execution_time_ms": 2278.2149999999997,
+      "tags": [
+        "stt_error",
+        "character_substitution"
+      ]
+    },
+    {
+      "test_id": "TC007",
+      "description": "",
+      "status": "[PASSED]",
+      "input_data": {
+        "stock_code": "00268",
+        "stock_name": "金碟"
+      },
+      "expected": {
+        "stock_code": "00268",
+        "stock_name": "金蝶國際"
+      },
+      "actual": {
+        "stock_code": "00268",
+        "stock_name": "金蝶國際"
+      },
+      "correction_result": {
+        "original_stock_name": "金碟",
+        "original_stock_code": "00268",
+        "corrected_stock_name": "金蝶國際",
+        "corrected_stock_code": null,
+        "confidence": 0.85,
+        "correction_applied": true,
+        "confidence_level": "none",
+        "reasoning": "name_search_code_verified match (85.0% confidence): 名稱: 金碟 → 金蝶國際",
+        "search_strategy": "optimized"
+      },
+      "error_message": null,
+      "execution_time_ms": 1461.1970000000001,
+      "tags": []
+    }
+  ]
+}

@@ -3,6 +3,7 @@ Tab: Transaction Analysis
 Analyze two transcriptions to identify stock transactions with confidence scoring
 """
 
+import json
 import traceback
 from typing import Literal, Optional
 import gradio as gr
@@ -10,18 +11,8 @@ import gradio as gr
 from pydantic import BaseModel, Field
 from langchain_ollama import ChatOllama
 
-
-# Common model options
-MODEL_OPTIONS = [
-    "qwen3:32b",
-    "gpt-oss:20b",
-    "gemma3-27b",
-    "deepseek-r1:32b",
-    "deepseek-r1:70b",
-]
-
-DEFAULT_MODEL = MODEL_OPTIONS[0]
-DEFAULT_OLLAMA_URL = "http://localhost:11434"
+# Import centralized model configuration
+from model_config import MODEL_OPTIONS, DEFAULT_MODEL, DEFAULT_OLLAMA_URL
 
 
 # Pydantic models for structured transaction output
@@ -168,7 +159,31 @@ def analyze_transactions(
             return (error_msg, "")
         
         # Build the prompt
-        stock_ref_text = stock_reference.strip() if stock_reference.strip() else "（無提供）"
+        # Parse stock reference from JSON format
+        stock_ref_text = "（無提供）"
+        if stock_reference.strip():
+            try:
+                stock_data = json.loads(stock_reference)
+                transactions = stock_data.get("transactions", [])
+                
+                if transactions:
+                    stock_lines = []
+                    for tx in transactions:
+                        stock_code = tx.get("stock_code", "")
+                        stock_name = tx.get("stock_name", "")
+                        if stock_code and stock_name:
+                            stock_lines.append(f"{stock_name} {stock_code}")
+                        elif stock_code:
+                            stock_lines.append(stock_code)
+                        elif stock_name:
+                            stock_lines.append(stock_name)
+                    
+                    if stock_lines:
+                        stock_ref_text = "\n".join(stock_lines)
+            except json.JSONDecodeError:
+                # If JSON parsing fails, treat as plain text (backward compatibility)
+                stock_ref_text = stock_reference.strip()
+        
         prompt = f"""請分析以下兩個STT模型生成的轉錄文字，識別是否有股票交易發生。
 
 ## 轉錄文字 1：
@@ -215,7 +230,6 @@ def analyze_transactions(
         
         # Try to parse as structured output
         try:
-            import json
             result_dict = json.loads(response_content)
             
             # Debug: Print raw JSON response
@@ -322,10 +336,10 @@ def create_transaction_analysis_tab():
                 )
                 
                 stock_reference_box = gr.Textbox(
-                    label="股票參考資料 (Stock References)",
-                    placeholder="例如：\n騰訊 0700\n阿里巴巴 9988\n滙豐 0005",
+                    label="股票參考資料 (Stock References - JSON Format)",
+                    placeholder='{\n  "transactions": [\n    {\n      "stock_code": "18138",\n      "stock_name": "騰訊認購證",\n      ...\n    },\n    {\n      "stock_code": "00020",\n      "stock_name": "金碟科技",\n      ...\n    }\n  ]\n}',
                     lines=5,
-                    info="輸入可能在對話中出現的股票名稱和代號。LLM將檢查並分析所有列出的股票。",
+                    info="輸入JSON格式的交易資料。系統將自動提取所有交易中的股票代號(stock_code)和股票名稱(stock_name)。",
                 )
                 
                 gr.Markdown("#### LLM 設定")

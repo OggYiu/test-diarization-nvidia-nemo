@@ -8,16 +8,10 @@ from langchain_ollama import ChatOllama
 from pathlib import Path
 import traceback
 
-# Common model options
-MODEL_OPTIONS = [
-    "qwen3:32b",
-    # "qwen2.5vl:32b",
-    "gpt-oss:20b",
-    "gemma3-27b",
-]
+# Import centralized model configuration
+from model_config import MODEL_OPTIONS, DEFAULT_MODEL
 
-# Default configuration
-DEFAULT_MODEL = MODEL_OPTIONS[0]
+# Local override for this GUI (can be customized if needed)
 DEFAULT_OLLAMA_URL = "http://192.168.61.2:11434"
 DEFAULT_SYSTEM_MESSAGE = (
     "你是一位精通粵語以及香港股市的分析師。請用繁體中文回應，"

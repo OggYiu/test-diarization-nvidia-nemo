@@ -1,0 +1,118 @@
+{
+  "description": "Test cases for stock verifier accuracy testing",
+  "version": "1.0",
+  "test_cases": [
+    {
+      "id": "TC001",
+      "description": "騰訊認購證 - exact code match priority test",
+      "input": {
+        "stock_code": "18138",
+        "stock_name": "騰訊升認購證"
+      },
+      "expected": {
+        "stock_code": "18138",
+        "stock_name": "騰訊摩通六一購B"
+      },
+      "tags": ["warrant", "exact_code_match", "critical"],
+      "notes": "This test verifies that when exact stock code is provided, it should match to the correct stock regardless of name similarity to other stocks"
+    },
+    {
+      "id": "TC002",
+      "description": "騰訊控股 - basic stock lookup",
+      "input": {
+        "stock_code": "700",
+        "stock_name": "騰訊"
+      },
+      "expected": {
+        "stock_code": "00700",
+        "stock_name": "騰訊控股"
+      },
+      "tags": ["basic", "blue_chip"],
+      "notes": "Common stock that should be easily found"
+    },
+    {
+      "id": "TC003",
+      "description": "小米集團 - basic stock lookup",
+      "input": {
+        "stock_code": "1810",
+        "stock_name": "小米"
+      },
+      "expected": {
+        "stock_code": "01810",
+        "stock_name": "小米集團－Ｗ"
+      },
+      "tags": ["basic", "tech"],
+      "notes": "Basic tech stock lookup"
+    },
+    {
+      "id": "TC004",
+      "description": "Code only lookup - 騰訊",
+      "input": {
+        "stock_code": "700",
+        "stock_name": null
+      },
+      "expected": {
+        "stock_code": "00700",
+        "stock_name": "騰訊控股"
+      },
+      "tags": ["code_only"],
+      "notes": "Test code-only lookup without name"
+    },
+    {
+      "id": "TC005",
+      "description": "Name only lookup - 騰訊",
+      "input": {
+        "stock_code": null,
+        "stock_name": "騰訊控股"
+      },
+      "expected": {
+        "stock_code": "00700",
+        "stock_name": "騰訊控股"
+      },
+      "tags": ["name_only"],
+      "notes": "Test name-only lookup without code"
+    },
+    {
+      "id": "TC006",
+      "description": "STT error - 泡泡沬特 (should be 瑪)",
+      "input": {
+        "stock_code": null,
+        "stock_name": "泡泡沬特"
+      },
+      "expected": {
+        "stock_code": "9992",
+        "stock_name": "泡泡瑪特"
+      },
+      "tags": ["stt_error", "character_substitution"],
+      "notes": "Common STT transcription error where 沬 should be 瑪"
+    },
+    {
+      "id": "TC007",
+      "description": "",
+      "input": {
+        "stock_code": "00268",
+        "stock_name": "金碟"
+      },
+      "expected": {
+        "stock_code": "00268",
+        "stock_name": "金蝶國際"
+      },
+      "tags": [],
+      "notes": ""
+    }
+  ],
+  "test_configuration": {
+    "default_strategy": "optimized",
+    "confidence_threshold": 0.4,
+    "top_k": 10,
+    "available_strategies": ["optimized", "semantic_only", "exact_only"]
+  },
+  "notes": [
+    "Add new test cases by appending to the test_cases array",
+    "Each test case should have a unique id",
+    "Tags help organize and filter test cases",
+    "The 'critical' tag indicates tests that must pass",
+    "Expected values can be null if the field shouldn't be corrected"
+  ]
+}
+

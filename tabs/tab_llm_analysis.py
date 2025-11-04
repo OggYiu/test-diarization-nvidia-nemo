@@ -10,18 +10,8 @@ import gradio as gr
 
 from langchain_ollama import ChatOllama
 
-
-# Common model options
-MODEL_OPTIONS = [
-    "qwen3:32b",
-    "gpt-oss:20b",
-    "gemma3-27b",
-    "deepseek-r1:32b",
-    "deepseek-r1:70b",
-]
-
-DEFAULT_MODEL = MODEL_OPTIONS[0]
-DEFAULT_OLLAMA_URL = "http://localhost:11434"
+# Import centralized model configuration
+from model_config import MODEL_OPTIONS, DEFAULT_MODEL, DEFAULT_OLLAMA_URL
 
 DEFAULT_SYSTEM_MESSAGE = (
     f"""你是一位精通粵語的香港股市的分析師，現在你的工作是電話錄音分析專員。你將會分析電話錄音的文字版本，但由於Speech To Text 技術的誤差，有很多的文字會出現誤認使對話內容難以理解，要用你的聽聰明才智去想像原本的對話內容。

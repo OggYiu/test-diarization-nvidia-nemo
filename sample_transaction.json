@@ -1,0 +1,32 @@
+{
+  "transactions": [
+    {
+      "transaction_type": "buy",
+      "confidence_score": 2.0,
+      "stock_code": "18138",
+      "stock_name": "騰訊認購證",
+      "quantity": "20000",
+      "price": "0.38",
+      "explanation": "客戶明確要求買入18138騰訊認購證，券商重複確認股票代號（三毫八三十八）、數量（兩萬股）和價格（三毫八），客戶最終確認交易，符合券商重複確認的標準，置信度為2分"
+    },
+    {
+      "transaction_type": "queue",
+      "confidence_score": 1.0,
+      "stock_code": "00020",
+      "stock_name": "金碟科技",
+      "quantity": "15",
+      "price": "0.72",
+      "explanation": "客戶提到「金碟啦，金点诶十五个七毫二买」，顯示有排隊買入意圖，但未完成確認流程，券商未重複確認交易細節，置信度為1分"
+    },
+    {
+      "transaction_type": "queue",
+      "confidence_score": 0.5,
+      "stock_code": "02411",
+      "stock_name": "阿里健康",
+      "quantity": "6",
+      "price": "0.67",
+      "explanation": "客戶提到「阿里健康系六个六毫七」，僅討論價格但未明確下單，券商未重複確認，置信度為0.5分"
+    }
+  ]
+}
+

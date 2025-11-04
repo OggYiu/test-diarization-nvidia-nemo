@@ -11,6 +11,8 @@ Unified Gradio GUI combining all phone call analysis tools:
 9. STT Stock Comparison
 10. Transcription Merger
 11. Transaction Analysis
+12. Milvus Vector Search
+13. Transaction Stock Search
 
 Modular version - each tab is in a separate file in the tabs/ directory
 """
@@ -30,6 +32,8 @@ from tabs import (
     create_stt_stock_comparison_tab,
     # create_transcription_merger_tab,
     create_transaction_analysis_tab,
+    create_milvus_search_tab,
+    create_transaction_stock_search_tab,
 )
 
 
@@ -57,6 +61,8 @@ def create_unified_interface():
             create_stt_stock_comparison_tab()
             # create_transcription_merger_tab()
             create_transaction_analysis_tab()
+            create_milvus_search_tab()
+            create_transaction_stock_search_tab()
     
     return demo
 

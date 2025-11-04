@@ -1,0 +1,18 @@
+# Stock Verifier Module Requirements
+
+# LangChain and Vector Store
+langchain-ollama>=0.1.0
+langchain-milvus>=0.1.0
+langchain-core>=0.1.0
+
+# Embeddings (Ollama must be running locally with qwen3-embedding:8b model)
+# Install Ollama from: https://ollama.ai
+# Then run: ollama pull qwen3-embedding:8b
+
+# Milvus client
+pymilvus>=2.3.0
+
+# Optional: For testing and development
+pytest>=7.4.0
+pytest-cov>=4.1.0
+
