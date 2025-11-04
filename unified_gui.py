@@ -72,9 +72,9 @@ def create_unified_interface():
 # ============================================================================
 
 if __name__ == "__main__":
-    print("🚀 Starting Unified Phone Call Analysis Suite...")
-    print("📝 All tools available in one interface!")
-    print("=" * 60)
+    print("🚀 Starting Unified Phone Call Analysis Suite...", flush=True)
+    print("📝 All tools available in one interface!", flush=True)
+    print("=" * 60, flush=True)
     
     demo = create_unified_interface()
     demo.launch(

@@ -450,10 +450,10 @@ def process_file_metadata(audio_file):
         audio_file: Audio file from Gradio interface
         
     Returns:
-        str: Formatted metadata string
+        str: JSON formatted metadata string
     """
     if audio_file is None:
-        return "❌ No file uploaded. Please drag and drop an audio file."
+        return json.dumps({"error": "No file uploaded. Please drag and drop an audio file."}, indent=2)
     
     try:
         # Get filename
@@ -465,13 +465,34 @@ def process_file_metadata(audio_file):
         # If parsing was successful, save to MongoDB
         if result['status'] == 'success' and result['data']:
             save_to_mongodb(METADATA_COLLECTION, result['data'], unique_key='filename')
-        
-        # Return the formatted output string for display
-        return result['formatted_output']
+            # Return JSON format with status and data
+            output_dict = {
+                "metadata": {
+                    "filename": result['data']['filename'],
+                    "broker_name": result['data']['broker_name'],
+                    "broker_id": result['data']['broker_id'],
+                    "client_number": result['data']['client_number'],
+                    "client_name": result['data']['client_name'],
+                    "client_id": result['data']['client_id'],
+                    "utc_datetime": result['data']['utc_datetime'],
+                    "hkt_datetime": result['data']['hkt_datetime'],
+                    "timestamp": result['data']['timestamp']
+                }
+            }
+            return json.dumps(output_dict, indent=2, ensure_ascii=False)
+        else:
+            # Error case - return error in JSON format
+            return json.dumps({
+                "status": "error",
+                "message": result['formatted_output']
+            }, indent=2, ensure_ascii=False)
         
     except Exception as e:
-        error_msg = f"❌ Error: {str(e)}\n\n{traceback.format_exc()}"
-        return error_msg
+        error_msg = f"Error: {str(e)}\n\n{traceback.format_exc()}"
+        return json.dumps({
+            "status": "error",
+            "message": error_msg
+        }, indent=2, ensure_ascii=False)
 
 
 def initialize_sensevoice_model():
