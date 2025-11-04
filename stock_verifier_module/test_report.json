@@ -1,13 +1,13 @@
 {
-  "timestamp": "2025-11-04T13:32:35.151350",
+  "timestamp": "2025-11-04T15:02:09.682682",
   "summary": {
-    "total_tests": 7,
-    "passed": 7,
+    "total_tests": 8,
+    "passed": 8,
     "failed": 0,
     "errors": 0,
     "skipped": 0,
     "pass_rate": 100.0,
-    "execution_time_ms": 7778.073
+    "execution_time_ms": 8038.185999999999
   },
   "results": [
     {
@@ -38,7 +38,7 @@
         "search_strategy": "optimized"
       },
       "error_message": null,
-      "execution_time_ms": 2401.3469999999998,
+      "execution_time_ms": 1832.208,
       "tags": [
         "warrant",
         "exact_code_match",
@@ -73,7 +73,7 @@
         "search_strategy": "optimized"
       },
       "error_message": null,
-      "execution_time_ms": 310.74800000000005,
+      "execution_time_ms": 335.364,
       "tags": [
         "basic",
         "blue_chip"
@@ -107,7 +107,7 @@
         "search_strategy": "optimized"
       },
       "error_message": null,
-      "execution_time_ms": 315.524,
+      "execution_time_ms": 337.984,
       "tags": [
         "basic",
         "tech"
@@ -137,11 +137,11 @@
         "confidence": 0.95,
         "correction_applied": true,
         "confidence_level": "none",
-        "reasoning": "exact_code_similar_name match (95.0% confidence): 名稱: None → 騰訊控股",
+        "reasoning": "exact_code_only match (95.0% confidence): 名稱: None → 騰訊控股",
         "search_strategy": "optimized"
       },
       "error_message": null,
-      "execution_time_ms": 303.29499999999996,
+      "execution_time_ms": 288.77799999999996,
       "tags": [
         "code_only"
       ]
@@ -174,7 +174,7 @@
         "search_strategy": "optimized"
       },
       "error_message": null,
-      "execution_time_ms": 707.7470000000001,
+      "execution_time_ms": 480.598,
       "tags": [
         "name_only"
       ]
@@ -207,7 +207,7 @@
         "search_strategy": "optimized"
       },
       "error_message": null,
-      "execution_time_ms": 2278.2149999999997,
+      "execution_time_ms": 2159.494,
       "tags": [
         "stt_error",
         "character_substitution"
@@ -234,14 +234,45 @@
         "original_stock_code": "00268",
         "corrected_stock_name": "金蝶國際",
         "corrected_stock_code": null,
-        "confidence": 0.85,
+        "confidence": 0.7,
         "correction_applied": true,
         "confidence_level": "none",
-        "reasoning": "name_search_code_verified match (85.0% confidence): 名稱: 金碟 → 金蝶國際",
+        "reasoning": "exact_code_unverified_name match (70.0% confidence): 名稱: 金碟 → 金蝶國際",
         "search_strategy": "optimized"
       },
       "error_message": null,
-      "execution_time_ms": 1461.1970000000001,
+      "execution_time_ms": 1335.235,
+      "tags": []
+    },
+    {
+      "test_id": "TC008",
+      "description": "",
+      "status": "[PASSED]",
+      "input_data": {
+        "stock_code": "01572",
+        "stock_name": "金蝶國際"
+      },
+      "expected": {
+        "stock_code": "00268",
+        "stock_name": "金蝶國際"
+      },
+      "actual": {
+        "stock_code": "00268",
+        "stock_name": "金蝶國際"
+      },
+      "correction_result": {
+        "original_stock_name": "金蝶國際",
+        "original_stock_code": "01572",
+        "corrected_stock_name": null,
+        "corrected_stock_code": "00268",
+        "confidence": 0.85,
+        "correction_applied": true,
+        "confidence_level": "none",
+        "reasoning": "name_search_better_match match (85.0% confidence): 代號: 01572 → 00268",
+        "search_strategy": "optimized"
+      },
+      "error_message": null,
+      "execution_time_ms": 1268.5249999999999,
       "tags": []
     }
   ]

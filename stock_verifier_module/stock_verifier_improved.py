@@ -621,7 +621,8 @@ def optimized_search_strategy(
        a. First search metadata with stock code to get exact matches
        b. Analyze if the stock name is similar
        c. If name is similar enough (>0.5), return that match with high confidence
-       d. If not similar, perform name search for further verification
+       d. If not similar, perform name search and compare similarity
+       e. If name search finds a more similar match, prefer that result
     2. If only name is provided, fall back to semantic search
     
     Returns:
@@ -634,13 +635,15 @@ def optimized_search_strategy(
         logging.info(f"Step 1: Searching metadata for exact code match: {normalized_code}")
         metadata_results = vector_store.search_by_metadata(stock_code=normalized_code, k=top_k)
         
+        code_match_doc = None
+        code_match_score = None
+        code_match_name = None
+        code_match_similarity = 0.0
+        
         if metadata_results:
             logging.info(f"Found {len(metadata_results)} exact code matches in metadata")
             
-            # STEP 2: Analyze name similarity for each code match
-            best_match = None
-            best_similarity = 0.0
-            
+            # STEP 2: Analyze name similarity for the code match
             for doc, score in metadata_results:
                 # Extract name from document
                 doc_name = None
@@ -648,90 +651,164 @@ def optimized_search_strategy(
                     doc_name = doc.metadata.get('stock_name_c') or doc.metadata.get('stock_name') or doc.metadata.get('AliasName')
                 if not doc_name and hasattr(doc, 'page_content'):
                     _, doc_name = parse_stock_from_content(doc.page_content)
-                
-                if stock_name and doc_name:
+                if doc_name:
                     # Calculate name similarity
-                    name_similarity = calculate_name_similarity(stock_name, doc_name)
-                    logging.info(f"  Code match: {normalized_code}, Name: {doc_name}, Similarity: {name_similarity:.2f}")
+                    name_similarity = 0.0
+                    if stock_name:
+                        name_similarity = calculate_name_similarity(stock_name, doc_name)
+                        logging.info(f"  Code match: {normalized_code}, Name: {doc_name}, Similarity: {name_similarity:.2f}")
                     
-                    if name_similarity > best_similarity:
-                        best_similarity = name_similarity
-                        best_match = (doc, score, name_similarity)
+                    # If stock_name is None, or if this match is better
+                    if not stock_name:
+                        # No name to compare, just take the first match
+                        if code_match_doc is None:
+                            code_match_doc = doc
+                            code_match_score = score
+                            code_match_name = doc_name
+                            code_match_similarity = 0.5  # Medium confidence without name verification
+                    elif name_similarity > code_match_similarity:
+                        code_match_similarity = name_similarity
+                        code_match_doc = doc
+                        code_match_score = score
+                        code_match_name = doc_name
                 else:
                     # No name to compare, but we have exact code match
                     logging.info(f"  Code match: {normalized_code} (no name comparison)")
-                    if not best_match:
-                        best_match = (doc, score, 0.5)  # Medium confidence without name verification
+                    if code_match_doc is None:
+                        code_match_doc = doc
+                        code_match_score = score
+                        code_match_name = None
+                        code_match_similarity = 0.5  # Medium confidence without name verification
             
             # If we have a match with good name similarity, return it
             NAME_SIMILARITY_THRESHOLD = 0.5
-            if best_match:
-                doc, score, name_similarity = best_match
+            
+            # Special case: If no stock_name provided, trust the code match
+            if code_match_doc and not stock_name:
+                confidence = 0.95  # Very high confidence for exact code match
+                logging.info(f"✓ Step 2: No name provided, trusting exact code match with confidence {confidence}")
                 
-                if name_similarity >= NAME_SIMILARITY_THRESHOLD:
-                    # High confidence: exact code + similar name
-                    confidence = 0.95  # Very high confidence
-                    logging.info(f"✓ Step 2: Name similarity {name_similarity:.2f} >= threshold {NAME_SIMILARITY_THRESHOLD}, returning match with confidence {confidence}")
-                    
-                    return [{
-                        'doc': doc,
-                        'score': score,
-                        'confidence': confidence,
-                        'match_type': 'exact_code_similar_name',
-                        'query': f"code:{normalized_code}",
-                        'weight': 1.0,
-                        'name_similarity': name_similarity,
-                    }]
-                else:
-                    # Names don't match well, proceed to Step 3
-                    logging.info(f"Step 2: Name similarity {name_similarity:.2f} < threshold {NAME_SIMILARITY_THRESHOLD}, proceeding to name verification")
-            else:
-                logging.info(f"Step 2: No name comparison possible, proceeding to name verification")
+                return [{
+                    'doc': code_match_doc,
+                    'score': code_match_score,
+                    'confidence': confidence,
+                    'match_type': 'exact_code_only',
+                    'query': f"code:{normalized_code}",
+                    'weight': 1.0,
+                    'name_similarity': 0.0,
+                }]
+            
+            if code_match_doc and code_match_similarity >= NAME_SIMILARITY_THRESHOLD:
+                # High confidence: exact code + similar name
+                confidence = 0.95  # Very high confidence
+                logging.info(f"✓ Step 2: Name similarity {code_match_similarity:.2f} >= threshold {NAME_SIMILARITY_THRESHOLD}, returning match with confidence {confidence}")
+                
+                return [{
+                    'doc': code_match_doc,
+                    'score': code_match_score,
+                    'confidence': confidence,
+                    'match_type': 'exact_code_similar_name',
+                    'query': f"code:{normalized_code}",
+                    'weight': 1.0,
+                    'name_similarity': code_match_similarity,
+                }]
+            elif code_match_doc:
+                # Names don't match well, proceed to Step 3
+                logging.info(f"Step 2: Name similarity {code_match_similarity:.2f} < threshold {NAME_SIMILARITY_THRESHOLD}, proceeding to name verification")
         else:
             logging.info(f"Step 1: No exact code matches found in metadata")
         
-        # STEP 3: Name verification - search by name to verify
+        # STEP 3: Name verification - search by name to compare
         if stock_name:
             logging.info(f"Step 3: Searching by name for verification: '{stock_name}'")
             name_results = vector_store.search(stock_name, k=top_k * 3)
             
-            # Check if any name search results have the same code
-            for doc, score in name_results:
-                metadata = doc.metadata if hasattr(doc, 'metadata') else {}
-                doc_code = metadata.get('stock_code', '')
+            if name_results:
+                # Get the best name match
+                name_match_doc = name_results[0][0]
+                name_match_score = name_results[0][1]
+                name_match_name = None
+                name_match_code = None
                 
-                if doc_code and codes_match(doc_code, normalized_code):
-                    # Found a match via name search with same code!
-                    confidence = 0.85  # High confidence: code match via name search
-                    logging.info(f"✓ Step 3: Found code match {normalized_code} via name search, confidence {confidence}")
+                # Extract name and code from name search result
+                if hasattr(name_match_doc, 'metadata'):
+                    name_match_name = name_match_doc.metadata.get('stock_name_c') or name_match_doc.metadata.get('stock_name') or name_match_doc.metadata.get('AliasName')
+                    name_match_code = name_match_doc.metadata.get('stock_code')
+                if not name_match_name and hasattr(name_match_doc, 'page_content'):
+                    name_match_code, name_match_name = parse_stock_from_content(name_match_doc.page_content)
+                
+                # Calculate similarity between input name and name search result
+                name_match_similarity = 0.0
+                if name_match_name:
+                    name_match_similarity = calculate_name_similarity(stock_name, name_match_name)
+                    logging.info(f"  Name search result: {name_match_code}, Name: {name_match_name}, Similarity: {name_match_similarity:.2f}")
+                
+                # Compare: Does the name search result match the input name better than the code search result?
+                if code_match_doc:
+                    # We have both code match and name match
+                    logging.info(f"Step 3: Comparing code match similarity ({code_match_similarity:.2f}) vs name match similarity ({name_match_similarity:.2f})")
+                    
+                    # Key decision: If name match is significantly better AND different from code match, prefer name match
+                    SIMILARITY_DIFFERENCE_THRESHOLD = 0.3
+                    if (name_match_similarity > code_match_similarity + SIMILARITY_DIFFERENCE_THRESHOLD):
+                        # Name search found a much better match
+                        confidence = 0.85  # High confidence: name-based search is much more similar
+                        logging.info(f"✓ Step 3: Name search result is significantly better ({name_match_similarity:.2f} vs {code_match_similarity:.2f}), preferring name search result")
+                        
+                        return [{
+                            'doc': name_match_doc,
+                            'score': name_match_score,
+                            'confidence': confidence,
+                            'match_type': 'name_search_better_match',
+                            'query': stock_name,
+                            'weight': 1.0,
+                            'name_similarity': name_match_similarity,
+                        }]
+                    else:
+                        # Code match is similar or better, stick with code match but with reduced confidence
+                        confidence = 0.7  # Medium-high confidence: exact code but name doesn't match perfectly
+                        logging.info(f"Step 3: Code match is comparable or better, returning code match with reduced confidence {confidence}")
+                        
+                        return [{
+                            'doc': code_match_doc,
+                            'score': code_match_score,
+                            'confidence': confidence,
+                            'match_type': 'exact_code_unverified_name',
+                            'query': f"code:{normalized_code}",
+                            'weight': 1.0,
+                            'name_similarity': code_match_similarity,
+                        }]
+                else:
+                    # No code match found, use name match
+                    confidence = 0.8  # High confidence for name-only match
+                    logging.info(f"✓ Step 3: No code match, using name search result with confidence {confidence}")
                     
                     return [{
-                        'doc': doc,
-                        'score': score,
+                        'doc': name_match_doc,
+                        'score': name_match_score,
                         'confidence': confidence,
-                        'match_type': 'name_search_code_verified',
+                        'match_type': 'name_search_only',
                         'query': stock_name,
                         'weight': 1.0,
+                        'name_similarity': name_match_similarity,
                     }]
             
-            # If we had metadata matches but name didn't verify, still return the best code match
-            # but with lower confidence
-            if metadata_results and best_match:
-                doc, score, name_similarity = best_match
-                confidence = 0.7  # Medium-high confidence: exact code but name doesn't match well
-                logging.info(f"Step 3: Name search didn't verify, returning code match with reduced confidence {confidence}")
+            # If we had metadata matches but name search failed
+            if code_match_doc:
+                confidence = 0.7  # Medium-high confidence: exact code but couldn't verify name
+                logging.info(f"Step 3: Name search failed, returning code match with reduced confidence {confidence}")
                 
                 return [{
-                    'doc': doc,
-                    'score': score,
+                    'doc': code_match_doc,
+                    'score': code_match_score,
                     'confidence': confidence,
                     'match_type': 'exact_code_unverified_name',
                     'query': f"code:{normalized_code}",
                     'weight': 1.0,
-                    'name_similarity': name_similarity,
+                    'name_similarity': code_match_similarity,
                 }]
             
-            logging.info(f"Step 3: Name search didn't find code match")
+            logging.info(f"Step 3: Name search didn't find good matches")
         
         # STEP 4: No metadata matches found, try broad semantic search with code
         logging.info(f"Step 4: Trying broad semantic search")
