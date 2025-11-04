@@ -16,6 +16,9 @@ from pydantic import BaseModel, Field
 from langchain_ollama import ChatOllama
 from langchain_core.output_parsers import PydanticOutputParser
 
+# Import centralized model configuration
+from model_config import MODEL_OPTIONS, DEFAULT_OLLAMA_URL
+
 # Import stock verification functionality
 from stock_verifier_module.stock_verifier_improved import (
     get_vector_store,
@@ -79,16 +82,9 @@ class ConversationStockExtraction(BaseModel):
 # Model Configuration
 # ============================================================================
 
-LLM_OPTIONS = [
-    "qwen3:32b",
-    "gpt-oss:20b",
-    "gemma3:27b",
-    "deepseek-r1:32b",
-    "deepseek-r1:70b",
-    "qwen2.5:72b",
-]
-
-DEFAULT_OLLAMA_URL = "http://localhost:11434"
+# Note: MODEL_OPTIONS and DEFAULT_OLLAMA_URL are imported from model_config.py
+# Use MODEL_OPTIONS as LLM_OPTIONS for consistency with this module
+LLM_OPTIONS = MODEL_OPTIONS
 
 DEFAULT_SYSTEM_MESSAGE = """你是一位精通粵語的香港股市分析專家。你的任務是從電話錄音的文字轉錄中識別所有提及的股票。
 

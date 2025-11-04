@@ -10,17 +10,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from langchain_ollama import ChatOllama
 
+# Import centralized model configuration
+from model_config import MODEL_OPTIONS, DEFAULT_OLLAMA_URL
 
-# Common model options
-LLM_OPTIONS = [
-    "qwen3:32b",
-    "gpt-oss:20b",
-    "gemma3:27b",
-    "deepseek-r1:32b",
-    "deepseek-r1:70b",
-]
+# Use MODEL_OPTIONS as LLM_OPTIONS for consistency with this module
+LLM_OPTIONS = MODEL_OPTIONS
 
-DEFAULT_OLLAMA_URL = "http://localhost:11434"
 DEFAULT_SYSTEM_PROMPT = ""
 
 

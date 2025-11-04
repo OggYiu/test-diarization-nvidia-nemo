@@ -6,6 +6,7 @@ This file contains model options used across different modules.
 # Common model options for Ollama LLM
 MODEL_OPTIONS = [
     "qwen3:32b",
+    "qwen3:14b",
     "gpt-oss:20b",
     "gemma3:27b",
     "deepseek-r1:32b",

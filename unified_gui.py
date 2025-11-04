@@ -32,8 +32,8 @@ from tabs import (
     create_stt_stock_comparison_tab,
     # create_transcription_merger_tab,
     create_transaction_analysis_tab,
-    create_milvus_search_tab,
-    create_transaction_stock_search_tab,
+    # create_milvus_search_tab,
+    # create_transaction_stock_search_tab,
 )
 
 
@@ -61,8 +61,8 @@ def create_unified_interface():
             create_stt_stock_comparison_tab()
             # create_transcription_merger_tab()
             create_transaction_analysis_tab()
-            create_milvus_search_tab()
-            create_transaction_stock_search_tab()
+            # create_milvus_search_tab()
+            # create_transaction_stock_search_tab()
     
     return demo
 
