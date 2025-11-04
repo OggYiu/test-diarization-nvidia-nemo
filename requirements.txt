@@ -36,6 +36,9 @@ pydantic>=2.0.0
 # Database
 pymongo>=4.0.0
 
+# Chinese Text Conversion
+opencc-python-reimplemented>=0.1.6
+
 # Core UI Framework
 gradio>=4.0.0
 

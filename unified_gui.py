@@ -13,6 +13,7 @@ Unified Gradio GUI combining all phone call analysis tools:
 11. Transaction Analysis
 12. Milvus Vector Search
 13. Transaction Stock Search
+14. Trade Verification
 
 Modular version - each tab is in a separate file in the tabs/ directory
 """
@@ -34,6 +35,7 @@ from tabs import (
     create_transaction_analysis_tab,
     # create_milvus_search_tab,
     # create_transaction_stock_search_tab,
+    create_trade_verification_tab,
 )
 
 
@@ -63,6 +65,7 @@ def create_unified_interface():
             create_transaction_analysis_tab()
             # create_milvus_search_tab()
             # create_transaction_stock_search_tab()
+            create_trade_verification_tab()
     
     return demo
 

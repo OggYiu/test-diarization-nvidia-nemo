@@ -16,6 +16,7 @@ from .tab_transcription_merger import create_transcription_merger_tab
 from .tab_transaction_analysis import create_transaction_analysis_tab
 from .tab_milvus_search import create_milvus_search_tab
 from .tab_transaction_stock_search import create_transaction_stock_search_tab
+from .tab_trade_verification import create_trade_verification_tab
 
 __all__ = [
     'create_file_metadata_tab',
@@ -31,5 +32,6 @@ __all__ = [
     'create_transaction_analysis_tab',
     'create_milvus_search_tab',
     'create_transaction_stock_search_tab',
+    'create_trade_verification_tab',
 ]
 
