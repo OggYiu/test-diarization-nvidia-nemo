@@ -83,6 +83,84 @@ DEVICE, DEVICE_NAME, DEVICE_INFO = get_device_info()
 # Initialize OpenCC converter for Simplified to Traditional Chinese conversion
 opencc_converter = OpenCC('s2t')  # Simplified to Traditional
 
+
+def apply_text_corrections(text_content: str, correction_json: str) -> tuple[str, str]:
+    """
+    Apply text corrections to transcription content.
+    
+    Args:
+        text_content: The transcription text to correct
+        correction_json: JSON string with correction rules
+        
+    Returns:
+        tuple: (corrected_text, error_message)
+               - corrected_text: The corrected text (or original if corrections failed)
+               - error_message: Empty string if successful, error message otherwise
+    """
+    if not correction_json or not correction_json.strip():
+        # No corrections to apply
+        return text_content, ""
+    
+    if not text_content or not text_content.strip():
+        # No text to correct
+        return text_content, ""
+    
+    try:
+        # Parse JSON
+        correction_data = json.loads(correction_json)
+        
+        corrected_text = text_content
+        corrections_applied = []
+        
+        # Handle both single correction object and array of corrections
+        if isinstance(correction_data, dict):
+            correction_list = [correction_data]
+        elif isinstance(correction_data, list):
+            correction_list = correction_data
+        else:
+            return text_content, "❌ Correction JSON must be an object or array"
+        
+        # Apply each correction
+        for idx, correction in enumerate(correction_list):
+            if not isinstance(correction, dict):
+                return text_content, f"❌ Correction item {idx} is not an object"
+            
+            if "wrong_words" not in correction or "correct_word" not in correction:
+                return text_content, f"❌ Correction item {idx} missing required fields"
+            
+            wrong_words = correction["wrong_words"]
+            correct_word = correction["correct_word"]
+            
+            if not isinstance(wrong_words, list):
+                return text_content, f"❌ 'wrong_words' must be an array"
+            
+            if not isinstance(correct_word, str):
+                return text_content, f"❌ 'correct_word' must be a string"
+            
+            # Apply replacements
+            for wrong_word in wrong_words:
+                if not isinstance(wrong_word, str):
+                    return text_content, f"❌ All items in 'wrong_words' must be strings"
+                
+                if wrong_word in corrected_text:
+                    count = corrected_text.count(wrong_word)
+                    corrected_text = corrected_text.replace(wrong_word, correct_word)
+                    corrections_applied.append(f"'{wrong_word}' → '{correct_word}' ({count}x)")
+        
+        # Return corrected text with success
+        if corrections_applied:
+            print(f"✅ Text corrections applied: {', '.join(corrections_applied)}")
+        
+        return corrected_text, ""
+        
+    except json.JSONDecodeError as e:
+        error_msg = f"❌ Invalid correction JSON: {str(e)}"
+        return text_content, error_msg
+    except Exception as e:
+        error_msg = f"❌ Error applying corrections: {str(e)}"
+        return text_content, error_msg
+
+
 def load_diarization_cache():
     """
     Load cached diarization results from MongoDB.
@@ -1585,21 +1663,409 @@ def process_batch_transcription(audio_files, zip_file, link_or_path, language, u
         return None, None, None, None, error_msg, ""
 
 
+def extract_timestamp_from_filename(filepath):
+    """
+    Extract timestamp from audio filename for sorting purposes.
+    
+    Args:
+        filepath: Full path to audio file
+        
+    Returns:
+        datetime object if timestamp is found, otherwise None
+    """
+    try:
+        filename = os.path.basename(filepath)
+        base_name = os.path.splitext(filename)[0]
+        
+        # Pattern 1 (with brackets and parentheses): [Broker Name Optional_ID]_Unknown1-ClientPhone_DateTime(Unknown2)
+        pattern1 = r'\[(.*?)\]_(\d+)-(\d+)_(\d{14})\((\d+)\)'
+        match = re.match(pattern1, base_name)
+        
+        # Pattern 2 (sanitized by Gradio - no brackets or parentheses): Broker Name Optional_ID_Unknown1-ClientPhone_DateTime Unknown2
+        if not match:
+            pattern2 = r'(.*?)_(\d+)-(\d+)_(\d{14})(\d+)'
+            match = re.match(pattern2, base_name)
+        
+        if match:
+            datetime_str = match.group(4)  # YYYYMMDDHHMMSS
+            # Parse to datetime object (UTC)
+            dt = datetime.strptime(datetime_str, "%Y%m%d%H%M%S")
+            return dt
+        else:
+            return None
+    except Exception as e:
+        return None
+
+
+def process_folder_batch(audio_input, language, use_sensevoice, use_whisperv3_cantonese, overwrite_diarization=False, padding_ms=100, use_enhanced_format=True, apply_corrections=False, correction_json="", progress=gr.Progress()):
+    """
+    Process either a single audio file, multiple audio files, or a folder containing audio files.
+    
+    Args:
+        audio_input: Either a single audio file path, list of file paths, or a folder path
+        language: Language code for transcription
+        use_sensevoice: Whether to use SenseVoiceSmall model
+        use_whisperv3_cantonese: Whether to use Whisper-v3-Cantonese model
+        overwrite_diarization: If True, reprocess diarization even if cached
+        padding_ms: Padding in milliseconds for chopping (default: 100)
+        use_enhanced_format: If True, add metadata header and timestamps to results
+        apply_corrections: If True, apply text corrections from correction_json
+        correction_json: JSON string with correction rules
+        
+    Returns:
+        tuple: (metadata_json, json_file, sensevoice_txt, whisperv3_txt, zip_file, 
+                sensevoice_labeled, whisperv3_labeled, llm_log, combined_json)
+    """
+    if audio_input is None:
+        return "", None, None, None, None, "", "", "", ""
+    
+    # Check if input is a directory, file, or list of files
+    audio_files = []
+    audio_extensions = ['.wav', '.mp3', '.flac', '.m4a', '.ogg', '.opus']
+    
+    # Handle list of files (multiple file upload)
+    if isinstance(audio_input, list):
+        for item in audio_input:
+            if item is None:
+                continue
+            
+            # Convert to string (handles NamedString from Gradio)
+            item_str = str(item)
+            
+            if isinstance(item, str):
+                # Check if it's an audio file
+                if os.path.isfile(item_str):
+                    ext = os.path.splitext(item_str)[1].lower()
+                    if ext in audio_extensions:
+                        audio_files.append(item_str)
+            else:
+                # Non-string item, add as-is
+                audio_files.append(item)
+    elif isinstance(audio_input, str):
+        if os.path.isdir(audio_input):
+            # It's a folder - get all audio files recursively
+            for root, dirs, files in os.walk(audio_input):
+                for file in files:
+                    ext = os.path.splitext(file)[1].lower()
+                    if ext in audio_extensions:
+                        audio_files.append(os.path.join(root, file))
+        elif os.path.isfile(audio_input):
+            # Single file
+            ext = os.path.splitext(audio_input)[1].lower()
+            if ext in audio_extensions:
+                audio_files = [audio_input]
+        else:
+            return "", None, None, None, None, "❌ Invalid input path", "", "", ""
+    else:
+        # Handle file object from Gradio
+        audio_files = [audio_input]
+    
+    if not audio_files:
+        error_msg = f"❌ No audio files found.\n\n"
+        if isinstance(audio_input, str) and os.path.isdir(audio_input):
+            error_msg += f"Folder path: {audio_input}\n\n"
+            error_msg += f"Please ensure the folder contains audio files with these extensions:\n"
+            error_msg += f".wav, .mp3, .flac, .m4a, .ogg, .opus"
+        else:
+            error_msg += "Please select one or more audio files, or enter a folder path."
+        return "", None, None, None, None, error_msg, "", "", ""
+    
+    # Sort by timestamp extracted from filename (chronological order)
+    # Files without parseable timestamps will be sorted alphabetically at the end
+    def sort_key(filepath):
+        timestamp = extract_timestamp_from_filename(filepath)
+        if timestamp:
+            # Return timestamp for chronological sorting
+            return (0, timestamp, os.path.basename(filepath))
+        else:
+            # Files without timestamps go to the end, sorted alphabetically
+            return (1, datetime.max, os.path.basename(filepath))
+    
+    audio_files.sort(key=sort_key)
+    
+    # Process each audio file
+    all_sensevoice_results = []
+    all_whisperv3_results = []
+    all_metadata = []
+    all_llm_logs = []
+    conversation_count = 0
+    
+    total_files = len(audio_files)
+    
+    try:
+        # Create a temporary output directory for combined results
+        temp_out_dir = tempfile.mkdtemp(prefix="multi_audio_")
+        
+        for file_idx, audio_file in enumerate(audio_files):
+            progress((file_idx / total_files), desc=f"Processing file {file_idx+1}/{total_files}...")
+            conversation_count += 1
+            
+            filename = os.path.basename(audio_file)
+            
+            # Process this single audio file
+            result = process_chop_and_transcribe(
+                audio_file, language, use_sensevoice, use_whisperv3_cantonese, 
+                overwrite_diarization, padding_ms, use_enhanced_format, progress
+            )
+            
+            metadata_json, json_file, sensevoice_txt, whisperv3_txt, zip_file, sensevoice_labeled, whisperv3_labeled, llm_log, status_message = result
+            
+            # Parse metadata to get structured info
+            metadata_dict = None
+            if metadata_json:
+                try:
+                    metadata_obj = json.loads(metadata_json)
+                    if 'metadata' in metadata_obj:
+                        metadata_dict = metadata_obj['metadata']
+                except:
+                    pass
+            
+            # Format header for this conversation
+            if conversation_count == 1:
+                header = f"# 對話 {conversation_count}: {filename}\n\n"
+            else:
+                header = f"\n\n# 對話 {conversation_count}: {filename}\n\n"
+            
+            if metadata_dict:
+                header += f"對話時間: {metadata_dict.get('hkt_datetime', 'N/A')}\n"
+                header += f"經紀: {metadata_dict.get('broker_name', 'Unknown')}\n"
+                header += f"broker_id: {metadata_dict.get('broker_id', 'N/A')}\n"
+                header += f"客戶: {metadata_dict.get('client_name', 'Unknown')}\n"
+                header += f"client_id: {metadata_dict.get('client_id', 'N/A')}\n\n"
+            else:
+                header += "Metadata: Not available\n\n"
+            
+            # Append to results
+            if sensevoice_labeled:
+                # Remove the metadata header if it already exists in the labeled output
+                sensevoice_content = sensevoice_labeled
+                if "對話時間:" in sensevoice_content:
+                    # Find where the actual conversation starts (first line with "經紀" or "客戶" and timestamp)
+                    lines = sensevoice_content.split('\n')
+                    content_start_idx = 0
+                    for i, line in enumerate(lines):
+                        # Look for conversation lines with timestamps like "經紀 Name (start_time: X.X):"
+                        if '(start_time:' in line and ('經紀' in line or '客戶' in line):
+                            content_start_idx = i
+                            break
+                    if content_start_idx > 0:
+                        sensevoice_content = '\n'.join(lines[content_start_idx:])
+                
+                all_sensevoice_results.append(header + sensevoice_content)
+            
+            if whisperv3_labeled:
+                # Remove the metadata header if it already exists in the labeled output
+                whisperv3_content = whisperv3_labeled
+                if "對話時間:" in whisperv3_content:
+                    # Find where the actual conversation starts (first line with "經紀" or "客戶" and timestamp)
+                    lines = whisperv3_content.split('\n')
+                    content_start_idx = 0
+                    for i, line in enumerate(lines):
+                        # Look for conversation lines with timestamps like "經紀 Name (start_time: X.X):"
+                        if '(start_time:' in line and ('經紀' in line or '客戶' in line):
+                            content_start_idx = i
+                            break
+                    if content_start_idx > 0:
+                        whisperv3_content = '\n'.join(lines[content_start_idx:])
+                
+                all_whisperv3_results.append(header + whisperv3_content)
+            
+            if metadata_json:
+                all_metadata.append(metadata_json)
+            
+            if llm_log:
+                all_llm_logs.append(f"# 對話 {conversation_count}: {filename}\n{llm_log}\n")
+        
+        progress(1.0, desc="Complete!")
+        
+        # Apply text corrections if enabled
+        correction_errors = []
+        if apply_corrections and correction_json and correction_json.strip():
+            progress(0.98, desc="Applying text corrections...")
+            
+            # Apply corrections to each individual result
+            for i in range(len(all_sensevoice_results)):
+                corrected_text, error_msg = apply_text_corrections(all_sensevoice_results[i], correction_json)
+                if error_msg:
+                    correction_errors.append(f"SenseVoice result {i+1}: {error_msg}")
+                else:
+                    all_sensevoice_results[i] = corrected_text
+            
+            for i in range(len(all_whisperv3_results)):
+                corrected_text, error_msg = apply_text_corrections(all_whisperv3_results[i], correction_json)
+                if error_msg:
+                    correction_errors.append(f"Whisper-v3 result {i+1}: {error_msg}")
+                else:
+                    all_whisperv3_results[i] = corrected_text
+        
+        # Combine all results
+        combined_sensevoice = "\n".join(all_sensevoice_results)
+        combined_whisperv3 = "\n".join(all_whisperv3_results)
+        combined_metadata = "\n\n".join(all_metadata)
+        combined_llm_log = "\n".join(all_llm_logs)
+        
+        # Add correction status to LLM log if corrections were applied
+        if apply_corrections and correction_json and correction_json.strip():
+            correction_status = "\n\n" + "="*60 + "\n"
+            correction_status += "📝 Text Corrections Applied\n"
+            correction_status += "="*60 + "\n"
+            if correction_errors:
+                correction_status += "⚠️ Some corrections failed:\n"
+                correction_status += "\n".join(correction_errors)
+            else:
+                correction_status += "✅ All text corrections applied successfully"
+            combined_llm_log += correction_status
+        
+        # Create JSON output separated by audio file
+        json_output = []
+        for file_idx, audio_file in enumerate(audio_files):
+            filename = os.path.basename(audio_file)
+            conversation_num = file_idx + 1
+            
+            # Parse metadata for this file
+            metadata_dict = None
+            if file_idx < len(all_metadata) and all_metadata[file_idx]:
+                try:
+                    metadata_obj = json.loads(all_metadata[file_idx])
+                    if 'metadata' in metadata_obj:
+                        metadata_dict = metadata_obj['metadata']
+                except:
+                    pass
+            
+            # Extract conversation text (remove header)
+            sensevoice_text = ""
+            whisperv3_text = ""
+            
+            if file_idx < len(all_sensevoice_results):
+                sensevoice_raw = all_sensevoice_results[file_idx]
+                # Remove the header to get just the conversation
+                if "對話時間:" in sensevoice_raw or "Metadata:" in sensevoice_raw:
+                    lines = sensevoice_raw.split('\n')
+                    content_lines = []
+                    started = False
+                    for line in lines:
+                        if '(start_time:' in line or (started and line.strip()):
+                            started = True
+                            content_lines.append(line)
+                        elif started and not line.strip():
+                            content_lines.append(line)
+                    sensevoice_text = '\n'.join(content_lines).strip()
+                else:
+                    sensevoice_text = sensevoice_raw.strip()
+            
+            if file_idx < len(all_whisperv3_results):
+                whisperv3_raw = all_whisperv3_results[file_idx]
+                # Remove the header to get just the conversation
+                if "對話時間:" in whisperv3_raw or "Metadata:" in whisperv3_raw:
+                    lines = whisperv3_raw.split('\n')
+                    content_lines = []
+                    started = False
+                    for line in lines:
+                        if '(start_time:' in line or (started and line.strip()):
+                            started = True
+                            content_lines.append(line)
+                        elif started and not line.strip():
+                            content_lines.append(line)
+                    whisperv3_text = '\n'.join(content_lines).strip()
+                else:
+                    whisperv3_text = whisperv3_raw.strip()
+            
+            file_data = {
+                "conversation_number": conversation_num,
+                "filename": filename,
+                "metadata": metadata_dict if metadata_dict else {},
+                "transcriptions": {}
+            }
+            
+            if sensevoice_text:
+                file_data["transcriptions"]["sensevoice"] = sensevoice_text
+            if whisperv3_text:
+                file_data["transcriptions"]["whisperv3_cantonese"] = whisperv3_text
+            
+            json_output.append(file_data)
+        
+        combined_json = json.dumps(json_output, ensure_ascii=False, indent=2)
+        
+        # Create a combined ZIP file
+        zip_path = os.path.join(temp_out_dir, "all_transcriptions.zip")
+        with zipfile.ZipFile(zip_path, 'w') as zipf:
+            # Save combined SenseVoice results
+            if combined_sensevoice:
+                sensevoice_path = os.path.join(temp_out_dir, "all_conversations_sensevoice.txt")
+                with open(sensevoice_path, 'w', encoding='utf-8') as f:
+                    f.write(combined_sensevoice)
+                zipf.write(sensevoice_path, arcname="all_conversations_sensevoice.txt")
+            
+            # Save combined Whisper results
+            if combined_whisperv3:
+                whisperv3_path = os.path.join(temp_out_dir, "all_conversations_whisperv3.txt")
+                with open(whisperv3_path, 'w', encoding='utf-8') as f:
+                    f.write(combined_whisperv3)
+                zipf.write(whisperv3_path, arcname="all_conversations_whisperv3.txt")
+            
+            # Save metadata
+            if combined_metadata:
+                metadata_path = os.path.join(temp_out_dir, "all_metadata.txt")
+                with open(metadata_path, 'w', encoding='utf-8') as f:
+                    f.write(combined_metadata)
+                zipf.write(metadata_path, arcname="all_metadata.txt")
+            
+            # Save JSON output
+            if combined_json:
+                json_path = os.path.join(temp_out_dir, "all_conversations.json")
+                with open(json_path, 'w', encoding='utf-8') as f:
+                    f.write(combined_json)
+                zipf.write(json_path, arcname="all_conversations.json")
+        
+        return (combined_metadata, None, None, None, zip_path, 
+                combined_sensevoice, combined_whisperv3, combined_llm_log, combined_json)
+        
+    except Exception as e:
+        error_msg = f"❌ Error during batch processing: {str(e)}\n\n{traceback.format_exc()}"
+        return "", None, None, None, None, error_msg, error_msg, error_msg, ""
+
+
+def process_audio_or_folder(audio_input, language, use_sensevoice, use_whisperv3_cantonese, overwrite_diarization, padding_ms, use_enhanced_format, apply_corrections, correction_json, progress=gr.Progress()):
+    """
+    Wrapper function that handles both file upload and folder path inputs.
+    
+    Args:
+        audio_input: File(s) from gr.File component
+        Other args: Same as process_folder_batch
+        
+    Returns:
+        Same as process_folder_batch
+    """
+    # Determine which input to use
+    if audio_input:
+        # Use file upload
+        final_input = audio_input
+    else:
+        return "", None, None, None, None, "❌ Please select audio file(s)", "", "", ""
+    
+    return process_folder_batch(
+        final_input, language, use_sensevoice, use_whisperv3_cantonese, 
+        overwrite_diarization, padding_ms, use_enhanced_format, apply_corrections, correction_json, progress
+    )
+
+
 def create_stt_tab():
     """Create and return the Batch Speech-to-Text tab (with integrated chopping)"""
     with gr.Tab("3️⃣ Auto-Diarize & Transcribe"):
         gr.Markdown("### Automatically diarize, chop, and transcribe audio")
-        gr.Markdown("*Upload an audio file. Diarization will be cached in MongoDB for future use.*")
+        gr.Markdown("*Select multiple audio files or enter a folder path. Results will be sorted chronologically by timestamp.*")
         
         with gr.Row():
             with gr.Column(scale=1):
                 gr.Markdown("#### Input")
                 
-                stt_audio_input = gr.Audio(
-                    label="Audio File",
+                stt_audio_input = gr.File(
+                    label="📁 Select Multiple Audio Files",
                     type="filepath",
-                    sources=["upload"]
+                    file_count="multiple"
                 )
+                
+                gr.Markdown("**─── OR ───**")
                 
                 stt_overwrite_diarization = gr.Checkbox(
                     label="🔄 Overwrite cached diarization",
@@ -1612,6 +2078,54 @@ def create_stt_tab():
                     value=True,
                     info="Add metadata header and RTTM timestamps to transcriptions"
                 )
+                
+                gr.Markdown("---")
+                
+                # Text correction section
+                stt_apply_corrections = gr.Checkbox(
+                    label="✏️ Apply text corrections",
+                    value=True,
+                    info="Apply text corrections to transcriptions"
+                )
+                
+                stt_correction_json = gr.Textbox(
+                    label="Correction JSON",
+                    value="""[
+  {
+    "wrong_words": ["蚊"],
+    "correct_word": "元港幣"
+  },
+  {
+    "wrong_words": ["毛", "號"],
+    "correct_word": "毫"
+  },
+  {
+    "wrong_words": ["嘥幾士"],
+    "correct_word": "嘥氣"
+  },
+  {
+    "wrong_words": ["姑"],
+    "correct_word": "沽"
+  },
+  {
+    "wrong_words": ["掛"],
+    "correct_word": "掛單賣出"
+  },
+  {
+    "wrong_words": ["排"],
+    "correct_word": "掛單買入"
+  },
+  {
+    "wrong_words": ["輪"],
+    "correct_word": "窩輪"
+  }
+]""",
+                    lines=6,
+                    info="JSON with wrong words and correct word (see Text Correction tab for examples)",
+                    visible=True
+                )
+                
+                gr.Markdown("---")
                 
                 gr.Markdown("#### Model Selection")
                 with gr.Row():
@@ -1654,8 +2168,8 @@ def create_stt_tab():
                         gr.Markdown("##### SenseVoiceSmall (Labeled)")
                         stt_sensevoice_labeled_output = gr.Textbox(
                             label="SenseVoiceSmall (經紀/客戶)",
-                            lines=10,
-                            max_lines=20,
+                            lines=20,
+                            max_lines=50,
                             interactive=False,
                             show_copy_button=True,
                             placeholder="LLM-labeled SenseVoiceSmall results will appear here..."
@@ -1665,8 +2179,8 @@ def create_stt_tab():
                         gr.Markdown("##### Whisper-v3-Cantonese (Labeled)")
                         stt_whisperv3_labeled_output = gr.Textbox(
                             label="Whisper-v3-Cantonese (經紀/客戶)",
-                            lines=10,
-                            max_lines=20,
+                            lines=20,
+                            max_lines=50,
                             interactive=False,
                             show_copy_button=True,
                             placeholder="LLM-labeled Whisper-v3 results will appear here..."
@@ -1675,29 +2189,50 @@ def create_stt_tab():
                 # LLM identification log
                 stt_llm_log_output = gr.Textbox(
                     label="🧠 LLM Speaker Identification Log",
-                    lines=5,
-                    max_lines=10,
+                    lines=10,
+                    max_lines=30,
                     interactive=False,
                     show_copy_button=True,
                     placeholder="LLM reasoning for speaker identification..."
+                )
+                
+                # JSON output separated by audio file
+                gr.Markdown("#### 📊 JSON Output (Separated by Audio File)")
+                stt_json_output = gr.Textbox(
+                    label="JSON Format - All Conversations",
+                    lines=20,
+                    max_lines=50,
+                    interactive=False,
+                    show_copy_button=True,
+                    placeholder="JSON formatted output with each audio file separated will appear here..."
                 )
                 
                 stt_zip_download = gr.File(
                     label="Download All Results (ZIP)",
                     interactive=False
                 )
-                stt_status_output = gr.Textbox(
-                    label="Status Log",
-                    lines=8,
-                    max_lines=15,
-                    interactive=False,
-                    show_copy_button=True
-                )
+        
+        # Wire up the checkbox to show/hide correction JSON input
+        stt_apply_corrections.change(
+            fn=lambda checked: gr.update(visible=checked),
+            inputs=[stt_apply_corrections],
+            outputs=[stt_correction_json]
+        )
         
         # Wire up the main transcription button
         stt_process_btn.click(
-            fn=process_chop_and_transcribe,
-            inputs=[stt_audio_input, stt_language_dropdown, stt_use_sensevoice, stt_use_whisperv3_cantonese, stt_overwrite_diarization, gr.Number(value=100, visible=False), stt_use_enhanced_format],
+            fn=process_audio_or_folder,
+            inputs=[
+                stt_audio_input, 
+                stt_language_dropdown, 
+                stt_use_sensevoice, 
+                stt_use_whisperv3_cantonese, 
+                stt_overwrite_diarization, 
+                gr.Number(value=100, visible=False), 
+                stt_use_enhanced_format,
+                stt_apply_corrections,
+                stt_correction_json
+            ],
             outputs=[
                 stt_metadata_output,  # metadata_json
                 gr.File(visible=False),  # json_file
@@ -1707,7 +2242,7 @@ def create_stt_tab():
                 stt_sensevoice_labeled_output,  # sensevoice_labeled
                 stt_whisperv3_labeled_output,  # whisperv3_labeled
                 stt_llm_log_output,  # llm_log
-                stt_status_output  # status
+                stt_json_output  # combined_json
             ]
         )
 

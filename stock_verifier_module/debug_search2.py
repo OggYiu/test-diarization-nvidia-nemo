@@ -36,3 +36,5 @@ for i, (doc, score) in enumerate(results, 1):
         print(f"   *** THIS IS STOCK 18138! ***")
     print()
 
+
+
