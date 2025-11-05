@@ -38,8 +38,8 @@ from tabs import (
     # create_milvus_search_tab,
     # create_transaction_stock_search_tab,
     create_trade_verification_tab,
-    create_text_correction_tab,
-    create_llm_chat_tab,
+    # create_text_correction_tab,
+    # create_llm_chat_tab,
 )
 
 
@@ -71,8 +71,8 @@ def create_unified_interface():
             # create_milvus_search_tab()
             # create_transaction_stock_search_tab()
             create_trade_verification_tab()
-            create_text_correction_tab()
-            create_llm_chat_tab()
+            # create_text_correction_tab()
+            # create_llm_chat_tab()
     
     return demo
 
