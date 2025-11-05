@@ -38,8 +38,8 @@ from tabs import (
     # create_transaction_stock_search_tab,
     create_trade_verification_tab,
     create_text_correction_tab,
-    create_llm_chat_tab,
     create_json_batch_analysis_tab,
+    create_llm_chat_tab,
 )
 
 
@@ -63,7 +63,6 @@ def create_unified_interface():
             # create_speaker_separation_tab()
             # create_audio_enhancement_tab()
             # create_llm_comparison_tab()
-            create_llm_chat_tab()
             create_json_batch_analysis_tab()
             # create_multi_llm_tab()
             create_stt_stock_comparison_tab()
@@ -73,6 +72,7 @@ def create_unified_interface():
             # create_transaction_stock_search_tab()
             create_trade_verification_tab()
             create_text_correction_tab()
+            create_llm_chat_tab()
     
     return demo
 

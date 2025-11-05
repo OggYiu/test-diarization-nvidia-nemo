@@ -2136,7 +2136,7 @@ def create_stt_tab():
                     )
                     stt_use_whisperv3_cantonese = gr.Checkbox(
                         label="Whisper-v3-Cantonese",
-                        value=True,
+                        value=False,
                         info="Large Whisper v3 Cantonese"
                     )
                 

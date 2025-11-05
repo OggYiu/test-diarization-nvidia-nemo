@@ -1,0 +1,45 @@
+[
+  {
+    "conversation_number": 1,
+    "filename": "call_morning.wav",
+    "metadata": {
+      "broker_name": "張經紀",
+      "broker_id": "B001",
+      "client_name": "李先生",
+      "client_id": "C123",
+      "hkt_datetime": "2025-01-15 10:30:00"
+    },
+    "transcriptions": {
+      "sensevoice": "經紀：早晨李生，今日想買啲咩？\n客戶：我想買騰信窩輪，個八五三八號嗰隻。\n經紀：好，騰信窩輪18538，我幫你掛單。\n客戶：買10手。\n經紀：明白，10手騰信窩輪18538，0.125蚊。\n客戶：好，就咁啦。\n經紀：收到，我而家幫你落單。"
+    }
+  },
+  {
+    "conversation_number": 2,
+    "filename": "call_afternoon.wav",
+    "metadata": {
+      "broker_name": "張經紀",
+      "broker_id": "B001",
+      "client_name": "李先生",
+      "client_id": "C123",
+      "hkt_datetime": "2025-01-15 14:15:00"
+    },
+    "transcriptions": {
+      "sensevoice": "經紀：李生，嗰隻窩輪已經買咗喇。\n客戶：好，幾錢入咗？\n經紀：0.125，幫你買咗10手。\n客戶：幾時成交嘅？\n經紀：上午11點幾。\n客戶：好，我知道喇。"
+    }
+  },
+  {
+    "conversation_number": 3,
+    "filename": "call_late_afternoon.wav",
+    "metadata": {
+      "broker_name": "張經紀",
+      "broker_id": "B001",
+      "client_name": "李先生",
+      "client_id": "C123",
+      "hkt_datetime": "2025-01-15 16:45:00"
+    },
+    "transcriptions": {
+      "sensevoice": "客戶：喂，我想沽番嗰隻窩輪。\n經紀：李生，你係咪講緊騰信嗰隻？\n客戶：係呀，而家幾錢？\n經紀：而家0.138，升咗唔少。\n客戶：咁全部沽晒啦。\n經紀：好，10手全部沽晒，我幫你掛單。\n客戶：唔該晒。"
+    }
+  }
+]
+

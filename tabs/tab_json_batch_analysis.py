@@ -10,6 +10,7 @@ import logging
 import time
 from typing import List, Dict, Any
 from datetime import datetime
+from collections import Counter
 import gradio as gr
 
 # Import from the stock comparison tab
@@ -28,6 +29,122 @@ from model_config import DEFAULT_OLLAMA_URL
 # JSON Batch Processing Functions
 # ============================================================================
 
+def create_merged_stocks_json(combined_results: List[Dict[str, Any]]) -> str:
+    """
+    Create a merged/deduplicated JSON output with unique stocks and averaged relevance scores.
+    
+    This function takes all the stocks from all conversations and LLMs, deduplicates them by stock_number,
+    and creates a single consolidated list with averaged relevance scores.
+    
+    Args:
+        combined_results: List of conversation result dictionaries
+        
+    Returns:
+        str: JSON string with merged stocks
+    """
+    # Dictionary to track stocks by stock_number
+    stocks_dict = {}  # key: stock_number, value: list of stock data
+    
+    # Count total analyses for averaging
+    total_analyses = 0
+    
+    # Collect all stocks from all conversations
+    for conv_result in combined_results:
+        stocks = conv_result.get("stocks", [])
+        for stock in stocks:
+            stock_number = stock.get("stock_number", "")
+            if stock_number:
+                if stock_number not in stocks_dict:
+                    stocks_dict[stock_number] = []
+                stocks_dict[stock_number].append(stock)
+        
+        # Count total analyses (number of LLM analyses across all conversations)
+        llms_used = conv_result.get("llms_used", [])
+        total_analyses += len(llms_used)
+    
+    # Merge stocks and calculate average relevance_score
+    merged_stocks = []
+    
+    for stock_number, stock_list in stocks_dict.items():
+        if not stock_list:
+            continue
+        
+        # Calculate average relevance_score across ALL analyses
+        # (not just the ones where the stock appeared)
+        relevance_scores = [s.get("relevance_score", 0) for s in stock_list]
+        total_score = sum(relevance_scores)
+        avg_relevance_score = total_score / total_analyses if total_analyses > 0 else 0
+        
+        # Use the first stock's data as base
+        merged_stock = {
+            "stock_number": stock_number,
+            "stock_name": stock_list[0].get("stock_name", ""),
+            "relevance_score": round(avg_relevance_score, 2),
+        }
+        
+        # Include original_word if present (use first non-empty one)
+        original_words = [s.get("original_word", "") for s in stock_list if s.get("original_word")]
+        if original_words:
+            # Use the most common original word, or first if tied
+            word_counts = Counter(original_words)
+            most_common_word = word_counts.most_common(1)[0][0]
+            merged_stock["original_word"] = most_common_word
+        
+        # Include corrected stock information (always populate, use first available or original values)
+        corrected_names = [s.get("corrected_stock_name") for s in stock_list if s.get("corrected_stock_name")]
+        corrected_numbers = [s.get("corrected_stock_number") for s in stock_list if s.get("corrected_stock_number")]
+        correction_confidences = [s.get("correction_confidence") for s in stock_list if s.get("correction_confidence")]
+        
+        # Always include these fields - use corrected values if available, otherwise use original values
+        merged_stock["corrected_stock_number"] = corrected_numbers[0] if corrected_numbers else stock_number
+        merged_stock["corrected_stock_name"] = corrected_names[0] if corrected_names else stock_list[0].get("stock_name", "")
+        merged_stock["correction_confidence"] = correction_confidences[0] if correction_confidences else 1.0
+        
+        # Determine confidence - use the most common one, or highest if tied
+        confidences = [s.get("confidence", "low").lower() for s in stock_list]
+        confidence_priority = {"high": 3, "medium": 2, "low": 1}
+        most_confident = max(confidences, key=lambda c: (confidences.count(c), confidence_priority.get(c, 0)))
+        merged_stock["confidence"] = most_confident
+        
+        # Combine reasoning from all sources (if present)
+        reasonings = [s.get("reasoning", "") for s in stock_list if s.get("reasoning")]
+        if reasonings:
+            # Only include unique reasonings
+            unique_reasonings = list(dict.fromkeys(reasonings))  # Preserve order while removing duplicates
+            if len(unique_reasonings) == 1:
+                merged_stock["reasoning"] = unique_reasonings[0]
+            else:
+                merged_stock["reasoning"] = " | ".join(unique_reasonings)
+        
+        # Add metadata about how many times this stock was found
+        merged_stock["detection_count"] = len(stock_list)
+        
+        # Track which LLM models detected this stock
+        llm_models = [s.get("llm_model", "") for s in stock_list if s.get("llm_model")]
+        if llm_models:
+            unique_models = list(dict.fromkeys(llm_models))  # Preserve order while removing duplicates
+            merged_stock["detected_by_llms"] = unique_models
+        
+        merged_stocks.append(merged_stock)
+    
+    # Sort by relevance_score (descending) then by stock_number
+    merged_stocks.sort(key=lambda s: (-s["relevance_score"], s["stock_number"]))
+    
+    # Create simplified combined JSON with only stocks
+    merged_data = {
+        "stocks": merged_stocks,
+        "metadata": {
+            "total_conversations": len(combined_results),
+            "total_analyses": total_analyses,
+            "unique_stocks_found": len(merged_stocks),
+            "note": "relevance_score is averaged across all analyses (conversations × LLMs)"
+        }
+    }
+    
+    # Format combined JSON
+    return json.dumps(merged_data, indent=2, ensure_ascii=False)
+
+
 def process_json_batch(
     json_input: str,
     selected_llms: list[str],
@@ -35,7 +152,8 @@ def process_json_batch(
     ollama_url: str,
     temperature: float,
     use_vector_correction: bool = True,
-) -> tuple[str, str]:
+    use_contextual_analysis: bool = True,
+) -> tuple[str, str, str]:
     """
     Process a JSON batch of conversations and extract stock information.
     
@@ -46,37 +164,39 @@ def process_json_batch(
         ollama_url: Ollama server URL
         temperature: Temperature parameter
         use_vector_correction: Whether to use vector store for stock name correction
+        use_contextual_analysis: Whether to use previous conversation context for better analysis
         
     Returns:
-        tuple[str, str]: (formatted_results, combined_json)
+        tuple[str, str, str]: (formatted_results, combined_json, merged_json)
     """
     try:
         # Validate inputs
         if not json_input or not json_input.strip():
-            return "❌ Error: Please provide a JSON input", ""
+            return "❌ Error: Please provide a JSON input", "", ""
         
         if not selected_llms or len(selected_llms) == 0:
-            return "❌ Error: Please select at least one LLM", ""
+            return "❌ Error: Please select at least one LLM", "", ""
         
         if not ollama_url or not ollama_url.strip():
-            return "❌ Error: Please specify Ollama URL", ""
+            return "❌ Error: Please specify Ollama URL", "", ""
         
         # Parse JSON
         try:
             conversations = json.loads(json_input)
         except json.JSONDecodeError as e:
-            return f"❌ Error: Invalid JSON format\n\n{str(e)}", ""
+            return f"❌ Error: Invalid JSON format\n\n{str(e)}", "", ""
         
         # Validate that it's an array
         if not isinstance(conversations, list):
-            return "❌ Error: JSON must be an array of conversation objects", ""
+            return "❌ Error: JSON must be an array of conversation objects", "", ""
         
         if len(conversations) == 0:
-            return "❌ Error: JSON array is empty", ""
+            return "❌ Error: JSON array is empty", "", ""
         
         # Process each conversation
         all_results = []
         combined_results = []
+        previous_contexts = []  # Store context from previous conversations
         
         total_conversations = len(conversations)
         total_llms = len(selected_llms)
@@ -88,6 +208,7 @@ def process_json_batch(
         output_parts.append(f"Total Conversations: {total_conversations}")
         output_parts.append(f"Selected LLMs: {total_llms} ({', '.join(selected_llms)})")
         output_parts.append(f"Vector Store Correction: {'✅ Enabled' if use_vector_correction else '❌ Disabled'}")
+        output_parts.append(f"Contextual Analysis: {'✅ Enabled' if use_contextual_analysis else '❌ Disabled'}")
         output_parts.append("=" * 100)
         output_parts.append("")
         
@@ -145,8 +266,38 @@ def process_json_batch(
                 output_parts.append("-" * 100)
                 output_parts.append("")
                 
+                # Build contextual information from previous conversations
+                contextual_system_message = system_message
+                if use_contextual_analysis and previous_contexts:
+                    output_parts.append(f"🔗 Using context from {len(previous_contexts)} previous conversation(s)")
+                    output_parts.append("")
+                    
+                    context_summary = "\n\n**===== CONTEXT FROM PREVIOUS CONVERSATIONS =====**\n"
+                    context_summary += "The following are summaries of previous conversations in this session. "
+                    context_summary += "Use this information to understand references and context in the current conversation.\n\n"
+                    
+                    for prev_ctx in previous_contexts:
+                        context_summary += f"--- Previous Conversation #{prev_ctx['conversation_number']} ---\n"
+                        context_summary += f"Summary: {prev_ctx['summary']}\n"
+                        if prev_ctx['stocks']:
+                            context_summary += "Stocks discussed:\n"
+                            for stock in prev_ctx['stocks']:
+                                stock_name = stock.get('corrected_stock_name') or stock.get('stock_name', 'N/A')
+                                stock_number = stock.get('corrected_stock_number') or stock.get('stock_number', 'N/A')
+                                context_summary += f"  - {stock_name} ({stock_number})\n"
+                        context_summary += "\n"
+                    
+                    context_summary += "**===== END OF PREVIOUS CONTEXT =====**\n"
+                    context_summary += "\nNow analyze the CURRENT conversation below. When you see abbreviated references "
+                    context_summary += "(like '窩輪' without a specific stock name), check if they might be referring to "
+                    context_summary += "stocks mentioned in the previous conversations above.\n"
+                    
+                    # Append context to system message
+                    contextual_system_message = system_message + "\n\n" + context_summary
+                
                 # Store results for this conversation
                 conv_stocks = []
+                conv_summary = ""
                 
                 # Process with each LLM
                 for llm_idx, model in enumerate(selected_llms, 1):
@@ -159,11 +310,11 @@ def process_json_batch(
                     
                     start_time = time.time()
                     
-                    # Extract stocks
+                    # Extract stocks (using contextual system message if available)
                     result_model, formatted_result, raw_json = extract_stocks_with_single_llm(
                         model=model,
                         conversation_text=transcription_text,
-                        system_message=system_message,
+                        system_message=contextual_system_message,
                         ollama_url=ollama_url,
                         temperature=temperature,
                         stt_source=transcription_source,
@@ -190,6 +341,10 @@ def process_json_batch(
                             for stock in stocks:
                                 stock["llm_model"] = model
                             conv_stocks.extend(stocks)
+                            
+                            # Capture summary for contextual analysis (prefer first LLM's summary)
+                            if not conv_summary and "summary" in parsed:
+                                conv_summary = parsed["summary"]
                         except json.JSONDecodeError:
                             pass
                 
@@ -205,6 +360,14 @@ def process_json_batch(
                 }
                 
                 combined_results.append(conversation_result)
+                
+                # Add this conversation's context for future conversations
+                if use_contextual_analysis:
+                    previous_contexts.append({
+                        "conversation_number": conv_number,
+                        "summary": conv_summary or "No summary available",
+                        "stocks": conv_stocks
+                    })
                 
                 output_parts.append(f"✅ Completed Conversation #{conv_number}")
                 output_parts.append("")
@@ -223,15 +386,18 @@ def process_json_batch(
         output_parts.append(f"Total Conversations Processed: {len(combined_results)} / {total_conversations}")
         output_parts.append("=" * 100)
         
-        # Format combined JSON
+        # Format combined JSON (all conversations with all stocks)
         combined_json = json.dumps(combined_results, indent=2, ensure_ascii=False)
         
-        return "\n".join(output_parts), combined_json
+        # Create merged JSON (deduplicated stocks with averaged relevance scores)
+        merged_json = create_merged_stocks_json(combined_results)
+        
+        return "\n".join(output_parts), combined_json, merged_json
         
     except Exception as e:
         error_msg = f"❌ Error: {str(e)}\n\nTraceback:\n{traceback.format_exc()}"
         logging.error(error_msg)
-        return error_msg, ""
+        return error_msg, "", ""
 
 
 # ============================================================================
@@ -241,24 +407,6 @@ def process_json_batch(
 def create_json_batch_analysis_tab():
     """Create and return the JSON Batch Analysis tab"""
     with gr.Tab("🔟 JSON Batch Analysis"):
-        gr.Markdown("### Batch Process Multiple Conversations from JSON")
-        gr.Markdown("""
-        **Process multiple conversations at once!** Paste a JSON array with conversation objects, 
-        and this tool will analyze each conversation sequentially to extract stock information.
-        
-        **JSON Format:**
-        - Array of conversation objects
-        - Each object should have: `conversation_number`, `filename`, `metadata`, `transcriptions`
-        - The `transcriptions` field can be a dictionary (with source names as keys) or a string
-        
-        **Features:**
-        - Sequential processing of conversations
-        - Multi-LLM support (analyze with multiple models)
-        - Vector Store Correction for STT errors
-        - Comprehensive metadata tracking
-        - Combined JSON output with all results
-        """)
-        
         with gr.Row():
             with gr.Column(scale=1):
                 gr.Markdown("#### 📋 JSON Input")
@@ -293,6 +441,12 @@ def create_json_batch_analysis_tab():
                 )
                 
                 gr.Markdown("#### ⚙️ Advanced Settings")
+                
+                use_contextual_analysis_checkbox = gr.Checkbox(
+                    label="🔗 Enable Contextual Analysis",
+                    value=True,
+                    info="Pass context from previous conversations to improve understanding of references and abbreviated mentions"
+                )
                 
                 use_vector_correction_checkbox = gr.Checkbox(
                     label="🔧 Enable Vector Store Correction",
@@ -335,19 +489,29 @@ def create_json_batch_analysis_tab():
                 
                 results_box = gr.Textbox(
                     label="Batch Analysis Results",
-                    lines=30,
+                    lines=20,
                     interactive=False,
                     show_copy_button=True,
                 )
                 
-                gr.Markdown("#### 📦 Combined JSON Output")
+                gr.Markdown("#### 📦 Combined JSON Output (All Conversations)")
                 
                 combined_json_box = gr.Textbox(
                     label="Complete Results in JSON Format",
-                    lines=20,
+                    lines=15,
                     interactive=False,
                     show_copy_button=True,
-                    info="All conversations with their extracted stocks in a single JSON structure"
+                    info="All conversations with their extracted stocks - organized by conversation"
+                )
+                
+                gr.Markdown("#### 🎯 Merged JSON Output (Deduplicated Stocks)")
+                
+                merged_json_box = gr.Textbox(
+                    label="Unique Stocks with Averaged Relevance Scores",
+                    lines=15,
+                    interactive=False,
+                    show_copy_button=True,
+                    info="All stocks merged and deduplicated by stock_number, with relevance scores averaged across all conversations and LLMs"
                 )
         
         # Connect the analyze button
@@ -360,7 +524,8 @@ def create_json_batch_analysis_tab():
                 ollama_url_box,
                 temperature_slider,
                 use_vector_correction_checkbox,
+                use_contextual_analysis_checkbox,
             ],
-            outputs=[results_box, combined_json_box],
+            outputs=[results_box, combined_json_box, merged_json_box],
         )
 
