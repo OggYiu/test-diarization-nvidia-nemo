@@ -47,8 +47,8 @@ class StockInfo(BaseModel):
     confidence: str = Field(
         description="Confidence level: 'high', 'medium', or 'low'"
     )
-    relevance_score: int = Field(
-        description="How sure the conversation talks about this specific stock (0=not discussed, 1=mentioned briefly, 2=actively discussed/traded)"
+    relevance_score: float = Field(
+        description="How sure the conversation talks about this specific stock (0.0=not discussed, 0.5=mentioned briefly, 1.0=actively discussed/traded). Use values between 0.0 and 1.0."
     )
     reasoning: Optional[str] = Field(
         default=None,
@@ -114,9 +114,10 @@ DEFAULT_SYSTEM_MESSAGE = """你是一位精通粵語的香港股市分析專家�
 3. **如果你修正了股票名稱（即轉錄文本中的詞與正確股票名稱不同），請在 original_word 欄位中提供轉錄文本中的原始詞語**
 4. 評估每個識別的置信度（high/medium/low）
 5. 評估對話與該股票的相關程度（relevance_score）：
-   - 0: 沒有實質討論（僅背景噪音或無關提及）
-   - 1: 簡短提及或詢問（例如：問價、一般查詢）
-   - 2: 積極討論或交易（例如：下單、詳細分析、交易確認）
+   - 0.0: 沒有實質討論（僅背景噪音或無關提及）
+   - 0.5: 簡短提及或詢問（例如：問價、一般查詢）
+   - 1.0: 積極討論或交易（例如：下單、詳細分析、交易確認）
+   - 可以使用 0.0 到 1.0 之間的任何數值（例如：0.3, 0.7, 0.9 等）
 6. 提供簡要的推理解釋
 
 **關於 original_word 欄位:**
@@ -284,11 +285,13 @@ def format_extraction_result(result: ConversationStockExtraction, model: str, st
                 "low": "⚠️"
             }.get(stock.confidence.lower(), "❓")
             
-            relevance_emoji = {
-                0: "⚫",  # Not discussed
-                1: "🔵",  # Mentioned briefly
-                2: "🟢"   # Actively discussed
-            }.get(stock.relevance_score, "❓")
+            # Determine relevance emoji based on score ranges
+            if stock.relevance_score < 0.25:
+                relevance_emoji = "⚫"  # Not discussed
+            elif stock.relevance_score < 0.75:
+                relevance_emoji = "🔵"  # Mentioned briefly
+            else:
+                relevance_emoji = "🟢"  # Actively discussed
             
             output.append(f"   {i}. {confidence_emoji} 股票 #{i}")
             output.append(f"      • 股票代號: {stock.stock_number}")
@@ -309,7 +312,7 @@ def format_extraction_result(result: ConversationStockExtraction, model: str, st
                     output.append(f"         ◦ 修正信心: {stock.correction_confidence:.2%}")
             
             output.append(f"      • 置信度: {stock.confidence.upper()}")
-            output.append(f"      • 相關程度: {relevance_emoji} {stock.relevance_score}/2")
+            output.append(f"      • 相關程度: {relevance_emoji} {stock.relevance_score:.2f}")
             
             if stock.reasoning:
                 output.append(f"      • 推理: {stock.reasoning}")

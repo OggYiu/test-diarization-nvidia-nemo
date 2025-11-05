@@ -170,7 +170,7 @@ test-diarization/
         "corrected_stock_number": "00700",
         "correction_confidence": 0.95,
         "confidence": "high",
-        "relevance_score": 2,
+        "relevance_score": 1.0,
         "reasoning": "Client mentioned buying Tencent",
         "llm_model": "qwen2.5:32b-instruct"
       }

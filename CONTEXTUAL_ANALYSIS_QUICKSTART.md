@@ -118,7 +118,7 @@ The system will:
 │  - Stock Number: 18538
 │  - Stock Name: 騰訊窩輪
 │  - Confidence: high
-│  - Relevance Score: 2 (actively discussed)
+│  - Relevance Score: 1.0 (actively discussed)
 │  - Reasoning: Referenced from previous conversation as "嗰隻窩輪"
 └──────────────────────────────────────
 ```
@@ -143,7 +143,7 @@ Notice:
 │  - Stock Number: Unknown
 │  - Stock Name: 窩輪
 │  - Confidence: low
-│  - Relevance Score: 1 (mentioned briefly)
+│  - Relevance Score: 0.5 (mentioned briefly)
 │  - Reasoning: Warrant mentioned but unclear which specific stock
 └──────────────────────────────────────
 ```

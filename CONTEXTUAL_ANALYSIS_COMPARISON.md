@@ -52,7 +52,7 @@ A client calls their broker three times in one day about the same warrant.
   - Stock Number: 18538
   - Stock Name: 騰訊窩輪
   - Confidence: high
-  - Relevance Score: 2 (actively discussed)
+  - Relevance Score: 1.0 (actively discussed)
   - Reasoning: Client explicitly mentioned stock name and number
 ```
 
@@ -62,7 +62,7 @@ A client calls their broker three times in one day about the same warrant.
   - Stock Number: Unknown
   - Stock Name: 窩輪 (warrant - generic)
   - Confidence: low
-  - Relevance Score: 1 (mentioned)
+  - Relevance Score: 0.5 (mentioned)
   - Reasoning: Referenced as "嗰隻窩輪" (that warrant) but specific stock unclear
   
   OR
@@ -78,7 +78,7 @@ A client calls their broker three times in one day about the same warrant.
   - Stock Number: Unknown or 00700 (might guess Tencent from "騰信")
   - Stock Name: 窩輪 or 騰訊相關窩輪 (Tencent-related warrant)
   - Confidence: low to medium
-  - Relevance Score: 2 (actively discussed)
+  - Relevance Score: 1.0 (actively discussed)
   - Reasoning: Referenced as "嗰隻窩輪" initially, broker mentions 
     "騰信" but specific warrant number unclear
 ```
@@ -99,7 +99,7 @@ A client calls their broker three times in one day about the same warrant.
   - Stock Number: 18538
   - Stock Name: 騰訊窩輪
   - Confidence: high
-  - Relevance Score: 2 (actively discussed)
+  - Relevance Score: 1.0 (actively discussed)
   - Reasoning: Client explicitly mentioned stock name and number
 ```
 
@@ -111,7 +111,7 @@ A client calls their broker three times in one day about the same warrant.
   - Stock Number: 18538
   - Stock Name: 騰訊窩輪
   - Confidence: high
-  - Relevance Score: 2 (actively discussed)
+  - Relevance Score: 1.0 (actively discussed)
   - Reasoning: Referenced as "嗰隻窩輪" (that warrant), which refers 
     to Tencent warrant 18538 discussed in Conversation 1
   - Context Used: Yes
@@ -125,7 +125,7 @@ A client calls their broker three times in one day about the same warrant.
   - Stock Number: 18538
   - Stock Name: 騰訊窩輪
   - Confidence: high
-  - Relevance Score: 2 (actively discussed)
+  - Relevance Score: 1.0 (actively discussed)
   - Reasoning: Client wants to sell "嗰隻窩輪" (that warrant), 
     referring to Tencent warrant 18538 from previous conversations
   - Context Used: Yes
@@ -193,7 +193,7 @@ Error Risk: Low
       "stock_number": "",
       "stock_name": "窩輪",
       "confidence": "low",
-      "relevance_score": 1,
+      "relevance_score": 0.5,
       "reasoning": "Warrant mentioned but specific stock unclear"
     }
   ]
@@ -210,7 +210,7 @@ Error Risk: Low
       "stock_number": "18538",
       "stock_name": "騰訊窩輪",
       "confidence": "high",
-      "relevance_score": 2,
+      "relevance_score": 1.0,
       "reasoning": "Referenced as 'that warrant', refers to Tencent warrant 18538 from Conversation 1"
     }
   ]

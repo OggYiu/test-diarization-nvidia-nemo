@@ -437,7 +437,7 @@ def create_transaction_analysis_tab():
                 
                 stock_reference_box = gr.Textbox(
                     label="股票參考資料 (Stock References - JSON Format)",
-                    placeholder='{\n  "stocks": [\n    {\n      "stock_number": "00700",\n      "stock_name": "騰訊",\n      "corrected_stock_number": "00700",\n      "corrected_stock_name": "騰訊控股",\n      "original_word": "騰訊",\n      "relevance_score": 2.0,\n      ...\n    }\n  ]\n}',
+                    placeholder='{\n  "stocks": [\n    {\n      "stock_number": "00700",\n      "stock_name": "騰訊",\n      "corrected_stock_number": "00700",\n      "corrected_stock_name": "騰訊控股",\n      "original_word": "騰訊",\n      "relevance_score": 1.0,\n      ...\n    }\n  ]\n}',
                     lines=5,
                     info="輸入JSON格式的股票參考資料。系統將自動提取所有股票的代號(stock_number)、名稱(stock_name)、修正版本(corrected_*)及STT原文(original_word)進行分析。",
                 )

@@ -159,7 +159,7 @@ The combined JSON output includes all conversations with their extracted stocks:
         "stock_number": "00700",
         "stock_name": "騰訊",
         "confidence": "high",
-        "relevance_score": 2,
+        "relevance_score": 1.0,
         "corrected_stock_name": "騰訊控股",
         "corrected_stock_number": "00700",
         "correction_confidence": 0.95,

@@ -26,19 +26,19 @@ from tabs import (
     # create_file_metadata_tab,
     # create_diarization_tab,
     create_stt_tab,
+    create_json_batch_analysis_tab,
     # create_llm_analysis_tab,
     # create_speaker_separation_tab,
     # create_audio_enhancement_tab,
     # create_llm_comparison_tab,
     # create_multi_llm_tab,
-    create_stt_stock_comparison_tab,
+    # create_stt_stock_comparison_tab,
     # create_transcription_merger_tab,
     create_transaction_analysis_tab,
     # create_milvus_search_tab,
     # create_transaction_stock_search_tab,
     create_trade_verification_tab,
     create_text_correction_tab,
-    create_json_batch_analysis_tab,
     create_llm_chat_tab,
 )
 
@@ -65,7 +65,7 @@ def create_unified_interface():
             # create_llm_comparison_tab()
             create_json_batch_analysis_tab()
             # create_multi_llm_tab()
-            create_stt_stock_comparison_tab()
+            # create_stt_stock_comparison_tab()
             # create_transcription_merger_tab()
             create_transaction_analysis_tab()
             # create_milvus_search_tab()

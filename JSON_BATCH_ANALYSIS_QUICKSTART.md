@@ -127,7 +127,7 @@ Use the provided `example_json_batch.json`:
 │           ◦ 股票名稱: 騰訊控股
 │           ◦ 修正信心: 95.00%
 │        • 置信度: HIGH
-│        • 相關程度: 🟢 2/2
+│        • 相關程度: 🟢 1.00
 └───────────────────────────────────
 ```
 
@@ -149,7 +149,7 @@ Use the provided `example_json_batch.json`:
         "stock_number": "00700",
         "stock_name": "騰訊",
         "confidence": "high",
-        "relevance_score": 2,
+        "relevance_score": 1.0,
         "corrected_stock_name": "騰訊控股",
         "corrected_stock_number": "00700",
         "correction_confidence": 0.95,

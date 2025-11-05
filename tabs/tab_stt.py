@@ -2052,9 +2052,6 @@ def process_audio_or_folder(audio_input, language, use_sensevoice, use_whisperv3
 def create_stt_tab():
     """Create and return the Batch Speech-to-Text tab (with integrated chopping)"""
     with gr.Tab("3️⃣ Auto-Diarize & Transcribe"):
-        gr.Markdown("### Automatically diarize, chop, and transcribe audio")
-        gr.Markdown("*Select multiple audio files or enter a folder path. Results will be sorted chronologically by timestamp.*")
-        
         with gr.Row():
             with gr.Column(scale=1):
                 gr.Markdown("#### Input")
