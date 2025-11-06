@@ -147,11 +147,21 @@ def load_trades_for_date(
     return matching_records
 
 
-def format_conversation_text(conversation_data: dict) -> str:
+def format_conversation_text(conversation_data: dict, conversation_label: str = "") -> str:
     """
     Format conversation data into readable text for LLM analysis
+    
+    Args:
+        conversation_data: Single conversation object
+        conversation_label: Optional label to identify this conversation (e.g., "Conversation #1")
     """
     text_parts = []
+    
+    # Add conversation label if provided
+    if conversation_label:
+        text_parts.append(f"\n{'='*80}")
+        text_parts.append(f"📞 {conversation_label}")
+        text_parts.append(f"{'='*80}\n")
     
     # Add metadata if available
     if "metadata" in conversation_data:
@@ -193,6 +203,42 @@ def format_conversation_text(conversation_data: dict) -> str:
             text_parts.append("")
     
     return "\n".join(text_parts)
+
+
+def combine_multiple_conversations(conversations_list: list[dict]) -> str:
+    """
+    Combine multiple conversation objects into a single unified context
+    
+    This is useful when conversations are related (e.g., same day, same client)
+    and context from earlier conversations can help analyze later ones.
+    
+    Args:
+        conversations_list: List of conversation objects
+        
+    Returns:
+        Combined conversation text with all conversations merged
+    """
+    combined_parts = []
+    
+    combined_parts.append(f"{'='*80}")
+    combined_parts.append(f"📞 COMBINED ANALYSIS OF {len(conversations_list)} CONVERSATIONS")
+    combined_parts.append(f"{'='*80}\n")
+    combined_parts.append(f"Note: This analysis treats all {len(conversations_list)} conversations as one unified context.")
+    combined_parts.append(f"Context from earlier conversations may help understand later ones.\n")
+    
+    # Combine all conversations
+    for idx, conv_data in enumerate(conversations_list, 1):
+        conv_label = f"Conversation #{idx}"
+        if "filename" in conv_data:
+            conv_label += f" ({conv_data['filename']})"
+        elif "metadata" in conv_data and "filename" in conv_data["metadata"]:
+            conv_label += f" ({conv_data['metadata']['filename']})"
+        
+        conv_text = format_conversation_text(conv_data, conv_label)
+        combined_parts.append(conv_text)
+        combined_parts.append("")  # Blank line between conversations
+    
+    return "\n".join(combined_parts)
 
 
 def format_trade_record(record: dict) -> str:
@@ -323,10 +369,20 @@ def analyze_conversation_records(
     client_id_filter: str,
     model_name: str,
     ollama_url: str,
-    temperature: float
+    temperature: float,
+    use_combined_analysis: bool = False
 ) -> tuple[str, str]:
     """
     Main function to analyze trade records against conversation
+    
+    Args:
+        conversation_json: JSON string containing conversation(s)
+        trades_file_path: Path to trades CSV file
+        client_id_filter: Optional client ID filter
+        model_name: LLM model to use
+        ollama_url: Ollama API URL
+        temperature: LLM temperature
+        use_combined_analysis: If True and input is array, analyze all conversations combined
     
     Returns:
         tuple: (formatted_text_result, json_result)
@@ -341,15 +397,29 @@ def analyze_conversation_records(
             conversation_data = json.loads(conversation_json)
             
             # Handle array format: [{"metadata": ...}, {"metadata": ...}]
-            # If array, process the first conversation only
             if isinstance(conversation_data, list):
                 if len(conversation_data) == 0:
                     error_msg = "❌ Error: Conversation array is empty"
                     return (error_msg, "")
                 
-                # Use the first conversation
-                conversation_data = conversation_data[0]
-                print(f"⚠️ Note: Input is an array with {len(json.loads(conversation_json))} conversations. Analyzing the first one only.")
+                # Check if combined analysis is requested
+                if use_combined_analysis and len(conversation_data) > 1:
+                    print(f"✨ Combined Analysis Mode: Analyzing {len(conversation_data)} conversations as one unified context")
+                    # Store the full list for combined analysis
+                    conversation_list = conversation_data
+                    # Use first conversation for date extraction
+                    conversation_data = conversation_data[0]
+                    is_combined_mode = True
+                else:
+                    # Use the first conversation only
+                    conversation_data = conversation_data[0]
+                    conversation_list = None
+                    is_combined_mode = False
+                    if len(json.loads(conversation_json)) > 1:
+                        print(f"⚠️ Note: Input is an array with {len(json.loads(conversation_json))} conversations. Analyzing the first one only.")
+            else:
+                conversation_list = None
+                is_combined_mode = False
             
         except json.JSONDecodeError as e:
             error_msg = f"❌ Error: Cannot parse conversation JSON: {str(e)}"
@@ -408,7 +478,12 @@ The hkt_datetime value must not be empty, None, or "N/A"."""
             return (error_msg, "")
         
         # Format conversation for analysis
-        conversation_text = format_conversation_text(conversation_data)
+        if is_combined_mode and conversation_list:
+            # Combined analysis: merge all conversations
+            conversation_text = combine_multiple_conversations(conversation_list)
+        else:
+            # Single conversation analysis
+            conversation_text = format_conversation_text(conversation_data)
         
         # Check if conversation has actual content
         if not conversation_text.strip() or len(conversation_text.strip()) < 50:
@@ -450,14 +525,26 @@ Example:
 {'='*80}
 """
         
-        # Add note if processing array
-        if is_array:
+        # Add note about analysis mode
+        if is_combined_mode and conversation_list:
+            output_text += f"""
+✨ COMBINED ANALYSIS MODE ENABLED
+   Analyzing {len(conversation_list)} conversations as one unified context.
+   Context from earlier conversations helps understand later ones.
+   
+   Conversations analyzed:
+"""
+            for idx, conv in enumerate(conversation_list, 1):
+                filename = conv.get('filename', conv.get('metadata', {}).get('filename', f'Conversation #{idx}'))
+                output_text += f"   {idx}. {filename}\n"
+            output_text += "\n"
+        elif is_array:
             conv_num = conversation_data.get('conversation_number', 1)
             filename = conversation_data.get('filename', 'N/A')
             output_text += f"""
 ⚠️ NOTE: Input contains {len(original_data)} conversations.
          Analyzing conversation #{conv_num}: {filename}
-         (To analyze others, input them individually)
+         (Enable "Combined Analysis" to analyze all conversations together)
 
 """
         
@@ -527,11 +614,24 @@ Example:
                 "client_id": client_id,
                 "trades_file": trades_file_path,
                 "model": model_name,
-                "total_records": len(trade_records)
+                "total_records": len(trade_records),
+                "combined_analysis_mode": is_combined_mode,
+                "conversations_analyzed": len(conversation_list) if is_combined_mode and conversation_list else 1
             },
             "analysis_result": analysis_result,
             "trade_records": trade_records
         }
+        
+        # Add conversation list info if in combined mode
+        if is_combined_mode and conversation_list:
+            json_output["conversations_info"] = [
+                {
+                    "index": idx,
+                    "filename": conv.get('filename', conv.get('metadata', {}).get('filename', f'Conversation #{idx}')),
+                    "hkt_datetime": conv.get('metadata', {}).get('hkt_datetime', 'N/A')
+                }
+                for idx, conv in enumerate(conversation_list, 1)
+            ]
         
         json_output_str = json.dumps(json_output, indent=2, ensure_ascii=False, default=str)
         
@@ -576,6 +676,12 @@ def create_conversation_record_analysis_tab():
             - Identify unauthorized or suspicious trades
             - Check compliance and audit trails
             - Analyze broker-client communication patterns
+            
+            **💡 New Feature: Combined Analysis**
+            - When input is an array of conversations, enable "Combined Analysis" to analyze all conversations together
+            - This is useful when conversations are related (same day, same client)
+            - Context from conversation 1 can help analyze trades mentioned in conversation 2
+            - Example: Stock mentioned in call #1 may be referred to as "that stock" in call #2
             """
         )
         
@@ -585,9 +691,15 @@ def create_conversation_record_analysis_tab():
                 
                 conversation_json_box = gr.Textbox(
                     label="Conversation JSON",
-                    placeholder='Single: {"metadata": {"hkt_datetime": "2025-10-20T10:15:30", ...}, "transcriptions": {...}}\n\nOR\n\nArray: [{"metadata": {...}, "transcriptions": {...}}, {...}]\n\n(Arrays: First conversation will be analyzed)',
+                    placeholder='Single: {"metadata": {"hkt_datetime": "2025-10-20T10:15:30", ...}, "transcriptions": {...}}\n\nOR\n\nArray: [{"metadata": {...}, "transcriptions": {...}}, {...}]\n\n(Arrays: Enable Combined Analysis to analyze all together)',
                     lines=15,
-                    info="Paste conversation JSON. Supports single object or array (first item analyzed). Must include hkt_datetime in metadata."
+                    info="Paste conversation JSON. Supports single object or array. Must include hkt_datetime in metadata."
+                )
+                
+                combined_analysis_checkbox = gr.Checkbox(
+                    label="🔗 Enable Combined Analysis",
+                    value=False,
+                    info="When input is an array, analyze ALL conversations together as one unified context (recommended for related conversations)"
                 )
                 
                 gr.Markdown("#### ⚙️ Settings")
@@ -662,6 +774,7 @@ def create_conversation_record_analysis_tab():
                 model_dropdown,
                 ollama_url_box,
                 temperature_slider,
+                combined_analysis_checkbox,
             ],
             outputs=[
                 results_box,
