@@ -1902,19 +1902,6 @@ def process_folder_batch(audio_input, language, use_sensevoice, use_whisperv3_ca
         combined_sensevoice = "\n".join(all_sensevoice_results)
         combined_whisperv3 = "\n".join(all_whisperv3_results)
         combined_metadata = "\n\n".join(all_metadata)
-        combined_llm_log = "\n".join(all_llm_logs)
-        
-        # Add correction status to LLM log if corrections were applied
-        if apply_corrections and correction_json and correction_json.strip():
-            correction_status = "\n\n" + "="*60 + "\n"
-            correction_status += "📝 Text Corrections Applied\n"
-            correction_status += "="*60 + "\n"
-            if correction_errors:
-                correction_status += "⚠️ Some corrections failed:\n"
-                correction_status += "\n".join(correction_errors)
-            else:
-                correction_status += "✅ All text corrections applied successfully"
-            combined_llm_log += correction_status
         
         # Create JSON output separated by audio file
         json_output = []
@@ -1944,7 +1931,8 @@ def process_folder_batch(audio_input, language, use_sensevoice, use_whisperv3_ca
                     content_lines = []
                     started = False
                     for line in lines:
-                        if '(start_time:' in line or (started and line.strip()):
+                        # Look for conversation lines (with or without timestamps)
+                        if '(start_time:' in line or ('經紀' in line and ':' in line) or ('客戶' in line and ':' in line) or (started and line.strip()):
                             started = True
                             content_lines.append(line)
                         elif started and not line.strip():
@@ -1961,7 +1949,8 @@ def process_folder_batch(audio_input, language, use_sensevoice, use_whisperv3_ca
                     content_lines = []
                     started = False
                     for line in lines:
-                        if '(start_time:' in line or (started and line.strip()):
+                        # Look for conversation lines (with or without timestamps)
+                        if '(start_time:' in line or ('經紀' in line and ':' in line) or ('客戶' in line and ':' in line) or (started and line.strip()):
                             started = True
                             content_lines.append(line)
                         elif started and not line.strip():
@@ -2018,7 +2007,7 @@ def process_folder_batch(audio_input, language, use_sensevoice, use_whisperv3_ca
                 zipf.write(json_path, arcname="all_conversations.json")
         
         return (combined_metadata, None, None, None, zip_path, 
-                combined_sensevoice, combined_whisperv3, combined_llm_log, combined_json)
+                combined_sensevoice, combined_whisperv3, combined_json)
         
     except Exception as e:
         error_msg = f"❌ Error during batch processing: {str(e)}\n\n{traceback.format_exc()}"
@@ -2072,7 +2061,7 @@ def create_stt_tab():
                 
                 stt_use_enhanced_format = gr.Checkbox(
                     label="📋 Enhanced format (metadata + timestamps)",
-                    value=True,
+                    value=False,
                     info="Add metadata header and RTTM timestamps to transcriptions"
                 )
                 
@@ -2105,16 +2094,32 @@ def create_stt_tab():
     "correct_word": "沽"
   },
   {
-    "wrong_words": ["掛"],
-    "correct_word": "掛單"
+    "wrong_words": ["排"],
+    "correct_word": "掛"
   },
   {
-    "wrong_words": ["排"],
+    "wrong_words": ["掛單"],
+    "correct_word": "掛"
+  },
+  {
+    "wrong_words": ["掛"],
     "correct_word": "掛單"
   },
   {
     "wrong_words": ["輪"],
     "correct_word": "窩輪"
+  },
+  {
+    "wrong_words": ["只"],
+    "correct_word": "隻股票"
+  },
+  {
+    "wrong_words": ["固"],
+    "correct_word": "股"
+  },
+  {
+    "wrong_words": ["巴巴"],
+    "correct_word": "阿里巴巴"
   }
 ]""",
                     lines=6,
@@ -2183,16 +2188,6 @@ def create_stt_tab():
                             placeholder="LLM-labeled Whisper-v3 results will appear here..."
                         )
                 
-                # LLM identification log
-                stt_llm_log_output = gr.Textbox(
-                    label="🧠 LLM Speaker Identification Log",
-                    lines=10,
-                    max_lines=30,
-                    interactive=False,
-                    show_copy_button=True,
-                    placeholder="LLM reasoning for speaker identification..."
-                )
-                
                 # JSON output separated by audio file
                 gr.Markdown("#### 📊 JSON Output (Separated by Audio File)")
                 stt_json_output = gr.Textbox(
@@ -2238,7 +2233,6 @@ def create_stt_tab():
                 stt_zip_download,  # zip_file
                 stt_sensevoice_labeled_output,  # sensevoice_labeled
                 stt_whisperv3_labeled_output,  # whisperv3_labeled
-                stt_llm_log_output,  # llm_log
                 stt_json_output  # combined_json
             ]
         )

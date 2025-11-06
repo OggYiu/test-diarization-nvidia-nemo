@@ -9,6 +9,7 @@ import traceback
 import logging
 import time
 import requests
+import re
 from typing import List, Dict, Any
 from datetime import datetime
 from collections import Counter
@@ -24,6 +25,135 @@ from tabs.tab_stt_stock_comparison import (
 
 # Import centralized model configuration
 from model_config import DEFAULT_OLLAMA_URL
+
+
+# ============================================================================
+# Utility Functions
+# ============================================================================
+
+def convert_chinese_number_to_digit(text: str) -> str:
+    """
+    Convert Chinese numerals and text quantities to numeric digits.
+    
+    Examples:
+        "一千" -> "1000"
+        "兩萬" -> "20000"
+        "10手" -> "10"
+        "1000股" -> "1000"
+        "三百五十" -> "350"
+        "5萬股" -> "50000"
+        
+    Args:
+        text: Input text containing numbers (Chinese or Arabic)
+        
+    Returns:
+        str: Numeric value as string, or empty string if conversion fails
+    """
+    if not text:
+        return ""
+    
+    # Convert to string if not already
+    text = str(text).strip()
+    
+    # If already a pure number, return it
+    if text.isdigit():
+        return text
+    
+    # Try to match pure decimal numbers (including floats)
+    pure_number_match = re.match(r'^(\d+(?:\.\d+)?)$', text)
+    if pure_number_match:
+        try:
+            return str(int(float(pure_number_match.group(1))))
+        except:
+            return pure_number_match.group(1)
+    
+    # Chinese number mappings
+    chinese_digits = {
+        '零': 0, '〇': 0,
+        '一': 1, '壹': 1,
+        '二': 2, '貳': 2, '兩': 2, '两': 2,
+        '三': 3, '參': 3, '叁': 3,
+        '四': 4, '肆': 4,
+        '五': 5, '伍': 5,
+        '六': 6, '陸': 6,
+        '七': 7, '柒': 7,
+        '八': 8, '捌': 8,
+        '九': 9, '玖': 9,
+    }
+    
+    chinese_units = {
+        '十': 10, '拾': 10,
+        '百': 100, '佰': 100,
+        '千': 1000, '仟': 1000,
+        '萬': 10000, '万': 10000,
+        '億': 100000000, '亿': 100000000,
+    }
+    
+    # Try to extract existing Arabic numerals first
+    arabic_match = re.search(r'(\d+(?:\.\d+)?)', text)
+    if arabic_match:
+        num_str = arabic_match.group(1)
+        # Check if there's a Chinese unit after the number (e.g., "5萬")
+        remaining = text[arabic_match.end():]
+        for unit_char, unit_val in chinese_units.items():
+            if unit_char in remaining:
+                try:
+                    return str(int(float(num_str) * unit_val))
+                except:
+                    pass
+        # Return just the numeric part, removing any non-numeric characters
+        try:
+            return str(int(float(num_str)))
+        except:
+            return num_str
+    
+    # Convert pure Chinese numerals
+    try:
+        # Remove common suffixes like 股, 手, 張, etc.
+        cleaned = re.sub(r'[股手張张块塊元蚊]', '', text).strip()
+        
+        if not any(c in cleaned for c in chinese_digits.keys() | chinese_units.keys()):
+            # No Chinese numerals found, return empty string instead of original text
+            logging.warning(f"No numeric value found in '{text}'")
+            return ""
+        
+        total = 0
+        current = 0
+        
+        i = 0
+        while i < len(cleaned):
+            char = cleaned[i]
+            
+            if char in chinese_digits:
+                current = chinese_digits[char]
+                i += 1
+            elif char in chinese_units:
+                unit = chinese_units[char]
+                if unit >= 10000:  # 萬 or 億
+                    total = (total + current) * unit
+                    current = 0
+                else:  # 十, 百, 千
+                    if current == 0:
+                        current = 1  # Handle cases like "十" meaning "10"
+                    total += current * unit
+                    current = 0
+                i += 1
+            else:
+                i += 1
+        
+        total += current
+        
+        # If total is still 0, return empty string instead of original text
+        if total <= 0:
+            logging.warning(f"Failed to convert Chinese number '{text}' - total is 0")
+            return ""
+            
+        return str(int(total))
+        
+    except Exception as e:
+        logging.warning(f"Failed to convert Chinese number '{text}': {e}")
+        # Return empty string instead of original text
+        return ""
 
 
 # ============================================================================
@@ -94,8 +224,10 @@ def create_merged_stocks_json(combined_results: List[Dict[str, Any]]) -> str:
         # Include quantity and price if present (use most common values)
         quantities = [s.get("quantity", "") for s in stock_list if s.get("quantity")]
         if quantities:
+            # Convert quantities to numeric format
+            numeric_quantities = [convert_chinese_number_to_digit(qty) for qty in quantities]
             # Use the most common quantity
-            qty_counts = Counter(quantities)
+            qty_counts = Counter(numeric_quantities)
             most_common_qty = qty_counts.most_common(1)[0][0]
             merged_stock["quantity"] = most_common_qty
         
@@ -210,12 +342,18 @@ For each stock provided, you need to:
 1. Search through the conversation text for any mention of the stock (by name, number, or alias)
 2. Determine if the stock was actually discussed or if it was incorrectly extracted
 3. Provide evidence (quote) from the conversation if found
-4. Assign a verification status: "CONFIRMED", "LIKELY", "UNCERTAIN", or "NOT_FOUND"
+4. Assign a verification status:
+   - "FOUND": Stock was clearly mentioned and discussed in the conversation
+   - "UNCERTAIN": Stock might have been mentioned but context is unclear or ambiguous
+   - "NOT_FOUND": Stock was not mentioned at all - likely a false extraction
+5. Extract the quantity and price if mentioned in the conversation
 
 Be thorough and look for:
 - Direct mentions of stock names or numbers
 - Cantonese/Chinese nicknames or abbreviations
 - Context clues that indicate the stock (e.g., "騰訊" for Tencent, "700" for 00700.HK)
+- Quantity expressions (e.g., "一千股", "10手", "兩萬", "5000")
+- Price information (e.g., "400蚊", "$5.2", "三百元")
 
 Respond ONLY with valid JSON in this format:
 {
@@ -223,9 +361,11 @@ Respond ONLY with valid JSON in this format:
     {
       "stock_number": "00700",
       "stock_name": "騰訊控股",
-      "verification_status": "CONFIRMED|LIKELY|UNCERTAIN|NOT_FOUND",
+      "verification_status": "FOUND|UNCERTAIN|NOT_FOUND",
       "evidence": "quote from conversation that mentions this stock",
-      "reasoning": "explanation of why you gave this status"
+      "reasoning": "explanation of why you gave this status",
+      "quantity": "quantity as mentioned in conversation (e.g., '一千', '10手', '5000股') or empty string if not found",
+      "price": "price as mentioned in conversation (e.g., '400蚊', '$5.2') or empty string if not found"
     }
   ]
 }"""
@@ -409,16 +549,6 @@ def process_json_batch(
                     output_parts.append(f"👥 Client: {metadata.get('client_name', 'N/A')} (ID: {metadata.get('client_id', 'N/A')})")
                     output_parts.append(f"📅 HKT DateTime: {metadata.get('hkt_datetime', 'N/A')}")
                 
-                output_parts.append("")
-                output_parts.append(f"📝 Transcription:")
-                output_parts.append("-" * 100)
-                # Show truncated transcription
-                trans_preview = transcription_text[:500] + "..." if len(transcription_text) > 500 else transcription_text
-                for line in trans_preview.split("\n"):
-                    output_parts.append(f"   {line}")
-                output_parts.append("-" * 100)
-                output_parts.append("")
-                
                 # Build contextual information from previous conversations
                 contextual_system_message = system_message
                 if use_contextual_analysis and previous_contexts:
@@ -570,7 +700,7 @@ def process_json_batch(
                 
                 verification_map = verification_result.get("verification_map", {})
                 
-                # Update merged stocks with verification status
+                # Update merged stocks with verification status and fix quantities
                 for stock in merged_stocks:
                     stock_number = stock.get("stock_number", "")
                     if stock_number in verification_map:
@@ -578,29 +708,74 @@ def process_json_batch(
                         stock["verification_status"] = verification.get("verification_status", "UNKNOWN")
                         stock["verification_evidence"] = verification.get("evidence", "")
                         stock["verification_reasoning"] = verification.get("reasoning", "")
+                        
+                        # Extract and fix quantity from verification if available
+                        verified_quantity = verification.get("quantity", "")
+                        if verified_quantity and verified_quantity.strip():
+                            # Convert Chinese/text quantities to digits
+                            converted_qty = convert_chinese_number_to_digit(verified_quantity)
+                            if converted_qty:
+                                stock["quantity"] = converted_qty
+                                stock["quantity_source"] = "verification"
+                        
+                        # Update price from verification if available
+                        verified_price = verification.get("price", "")
+                        if verified_price and verified_price.strip():
+                            stock["price"] = verified_price
+                            stock["price_source"] = "verification"
                     else:
                         stock["verification_status"] = "NOT_VERIFIED"
+                
+                # Map verification status to numeric score
+                verification_score_map = {
+                    "FOUND": 1.0,
+                    "UNCERTAIN": 0.5,
+                    "NOT_FOUND": 0.0,
+                    "NOT_VERIFIED": 0.0
+                }
+                
+                # Filter out NOT_FOUND stocks (exclude stocks that weren't actually mentioned)
+                filtered_stocks = []
+                filtered_out_stocks = []
+                
+                for stock in merged_stocks:
+                    verification_status = stock.get("verification_status", "NOT_VERIFIED")
+                    verification_score = verification_score_map.get(verification_status, 0.0)
+                    stock["verification_score"] = verification_score
+                    
+                    # Keep FOUND and UNCERTAIN, exclude NOT_FOUND and NOT_VERIFIED
+                    if verification_status in ["FOUND", "UNCERTAIN"]:
+                        filtered_stocks.append(stock)
+                    else:
+                        filtered_out_stocks.append(stock)
+                
+                # Update merged_json_data with filtered stocks
+                merged_json_data["stocks"] = filtered_stocks
+                merged_json_data["metadata"]["unique_stocks_found"] = len(filtered_stocks)
+                merged_json_data["metadata"]["filtered_out_stocks"] = len(filtered_out_stocks)
                 
                 # Add verification metadata
                 merged_json_data["verification_metadata"] = {
                     "verification_enabled": True,
                     "verification_llm": verification_result.get("verification_llm"),
-                    "verification_timestamp": verification_result.get("verification_timestamp")
+                    "verification_timestamp": verification_result.get("verification_timestamp"),
+                    "filter_logic": "Exclude NOT_FOUND stocks",
+                    "stocks_filtered_out": len(filtered_out_stocks)
                 }
                 
                 # Display verification results
                 verification_parts.append("📋 VERIFICATION RESULTS:")
                 verification_parts.append("")
                 
-                # Group by verification status
+                # Group by verification status (using original merged_stocks before filtering)
                 status_groups = {
-                    "CONFIRMED": [],
-                    "LIKELY": [],
+                    "FOUND": [],
                     "UNCERTAIN": [],
                     "NOT_FOUND": []
                 }
                 
-                for stock in merged_stocks:
+                all_verified_stocks = filtered_stocks + filtered_out_stocks
+                for stock in all_verified_stocks:
                     status = stock.get("verification_status", "NOT_VERIFIED")
                     if status in status_groups:
                         status_groups[status].append(stock)
@@ -609,8 +784,7 @@ def process_json_batch(
                 for status, stocks_in_group in status_groups.items():
                     if stocks_in_group:
                         emoji_map = {
-                            "CONFIRMED": "✅",
-                            "LIKELY": "🟢",
+                            "FOUND": "✅",
                             "UNCERTAIN": "🟡",
                             "NOT_FOUND": "❌"
                         }
@@ -622,17 +796,65 @@ def process_json_batch(
                             stock_number = stock.get("corrected_stock_number") or stock.get("stock_number", "N/A")
                             evidence = stock.get("verification_evidence", "")
                             reasoning = stock.get("verification_reasoning", "")
+                            verification_score = stock.get("verification_score", 0.0)
+                            quantity = stock.get("quantity", "")
+                            quantity_source = stock.get("quantity_source", "")
+                            price = stock.get("price", "")
+                            price_source = stock.get("price_source", "")
                             
                             verification_parts.append(f"   • {stock_name} ({stock_number})")
+                            verification_parts.append(f"     📊 Verification Score: {verification_score}")
+                            
+                            # Show quantity if available
+                            if quantity:
+                                qty_label = "Quantity (Fixed)" if quantity_source == "verification" else "Quantity"
+                                verification_parts.append(f"     {qty_label}: {quantity}")
+                            
+                            # Show price if available
+                            if price:
+                                price_label = "Price (Fixed)" if price_source == "verification" else "Price"
+                                verification_parts.append(f"     {price_label}: {price}")
+                            
                             if reasoning:
-                                verification_parts.append(f"     Reasoning: {reasoning}")
+                                verification_parts.append(f"     💭 Reasoning: {reasoning}")
                             if evidence:
                                 evidence_preview = evidence[:200] + "..." if len(evidence) > 200 else evidence
-                                verification_parts.append(f"     Evidence: \"{evidence_preview}\"")
+                                verification_parts.append(f"     📝 Evidence: \"{evidence_preview}\"")
                         verification_parts.append("")
+                
+                # Display filtered stocks information
+                if filtered_out_stocks:
+                    verification_parts.append("")
+                    verification_parts.append("🚫 STOCKS FILTERED OUT (Verification Score < 0.5):")
+                    verification_parts.append(f"   Total filtered out: {len(filtered_out_stocks)}")
+                    verification_parts.append("")
+                    
+                    for stock in filtered_out_stocks:
+                        stock_name = stock.get("corrected_stock_name") or stock.get("stock_name", "N/A")
+                        stock_number = stock.get("corrected_stock_number") or stock.get("stock_number", "N/A")
+                        verification_status = stock.get("verification_status", "NOT_VERIFIED")
+                        verification_score = stock.get("verification_score", 0.0)
+                        reasoning = stock.get("verification_reasoning", "")
+                        evidence = stock.get("verification_evidence", "")
+                        quantity = stock.get("quantity", "")
+                        
+                        qty_info = f", Qty: {quantity}" if quantity else ""
+                        verification_parts.append(f"   • {stock_name} ({stock_number}){qty_info}")
+                        verification_parts.append(f"     Status: {verification_status}")
+                        verification_parts.append(f"     📊 Verification Score: {verification_score}")
+                        
+                        if reasoning:
+                            verification_parts.append(f"     💭 Reasoning: {reasoning}")
+                        if evidence:
+                            evidence_preview = evidence[:200] + "..." if len(evidence) > 200 else evidence
+                            verification_parts.append(f"     📝 Evidence: \"{evidence_preview}\"")
+                    verification_parts.append("")
+                    verification_parts.append("   ⚠️ These stocks have been excluded from the final 'Unique Stocks with Averaged Relevance Scores' output")
+                    verification_parts.append("")
                 
                 verification_parts.append("=" * 100)
                 verification_parts.append("✓ VERIFICATION COMPLETED")
+                verification_parts.append(f"   Final stocks in output: {len(filtered_stocks)} / {len(all_verified_stocks)}")
                 verification_parts.append("=" * 100)
                 
                 verification_output = "\n".join(verification_parts)

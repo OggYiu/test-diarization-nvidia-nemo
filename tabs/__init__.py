@@ -3,10 +3,7 @@ Tabs module for the Unified Phone Call Analysis Suite
 Each tab is in a separate file for better organization
 """
 
-from .tab_file_metadata import create_file_metadata_tab
-from .tab_diarization import create_diarization_tab
 from .tab_stt import create_stt_tab
-from .tab_llm_analysis import create_llm_analysis_tab
 from .tab_speaker_separation import create_speaker_separation_tab
 from .tab_llm_comparison import create_llm_comparison_tab
 from .tab_llm_chat import create_llm_chat_tab

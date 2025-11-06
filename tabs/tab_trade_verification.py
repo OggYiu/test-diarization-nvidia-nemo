@@ -457,55 +457,212 @@ def match_transaction_to_trades(
     return result
 
 
+def save_to_report_csv(verification_data: Dict, metadata: Dict, report_file: str = "report.csv") -> str:
+    """
+    Save verification results to report.csv with UTF-8 encoding for Chinese characters.
+    
+    Duplicate Detection Logic:
+    - Checks if existing records have the same (client_id, broker_id, hkt_datetime)
+    - If found, DELETE ALL matching records first
+    - Then add all new records for this client/broker/datetime combination
+    
+    Args:
+        verification_data: The JSON analysis dict from verify_transactions
+        metadata: The metadata dict with client info
+        report_file: Path to the report CSV file
+    
+    Returns:
+        Status message
+    """
+    try:
+        # Prepare rows to write
+        new_rows = []
+        
+        client_id = metadata.get("client_id", "N/A")
+        broker_id = metadata.get("broker_id", "N/A")
+        
+        for tx_verification in verification_data.get("transaction_verifications", []):
+            tx_details = tx_verification.get("transaction_details", {})
+            tx_summary = tx_verification.get("verification_summary", {})
+            
+            # Extract transaction info
+            hkt_datetime = tx_details.get("hkt_datetime", "N/A")
+            stock_code = tx_details.get("stock_code", "N/A")
+            stock_name = tx_details.get("stock_name", "N/A")
+            tx_type = tx_details.get("type", "N/A")
+            quantity = tx_details.get("quantity", "N/A")
+            price = tx_details.get("price", "N/A")
+            llm_confidence = tx_details.get("llm_confidence_score", "N/A")
+            
+            # Extract verification results
+            total_matches = tx_summary.get("total_matches_found", 0)
+            best_match_confidence = tx_summary.get("best_match_confidence", 0.0)
+            status = tx_summary.get("status", "N/A")
+            summary = tx_summary.get("summary", "").replace("\n", " ")
+            
+            # Get best match details if available
+            best_match_stock_name_similarity = 0.0
+            best_match_order_no = "N/A"
+            best_match_order_time = "N/A"
+            
+            matched_records = tx_verification.get("matched_records", [])
+            if matched_records:
+                best_match = matched_records[0]  # First one is the best
+                best_match_stock_name_similarity = best_match.get("stock_name_similarity", 0.0)
+                # We don't have direct access to trade record here, so we'll leave these as N/A
+            
+            # Create row
+            row = {
+                "client_id": client_id,
+                "broker_id": broker_id,
+                "hkt_datetime": hkt_datetime,
+                "transaction_type": tx_type,
+                "stock_code": stock_code,
+                "stock_name": stock_name,
+                "quantity": quantity,
+                "price": price,
+                "llm_confidence_score": llm_confidence,
+                # "total_matches_found": total_matches,
+                "best_match_confidence": f"{best_match_confidence:.2f}",
+            }
+            new_rows.append(row)
+        
+        if not new_rows:
+            return "⚠️ No transactions to save to report"
+        
+        # Define CSV columns
+        fieldnames = [
+            "client_id",
+            "broker_id",
+            "hkt_datetime",
+            "transaction_type",
+            "stock_code",
+            "stock_name",
+            "quantity",
+            "price",
+            "llm_confidence_score",
+            "total_matches_found",
+            "best_match_confidence",
+        ]
+        
+        # Read existing records if file exists
+        existing_rows = []
+        file_exists = os.path.exists(report_file)
+        
+        if file_exists:
+            try:
+                with open(report_file, 'r', encoding='utf-8-sig', newline='') as f:
+                    reader = csv.DictReader(f)
+                    existing_rows = list(reader)
+            except Exception as e:
+                logging.warning(f"Could not read existing report.csv: {e}")
+        
+        # Determine which records to delete based on (client_id, broker_id, hkt_datetime)
+        # Get the unique combination from new rows
+        new_keys_to_delete = set()
+        for new_row in new_rows:
+            key = (
+                new_row["client_id"],
+                new_row["broker_id"],
+                new_row["hkt_datetime"]
+            )
+            new_keys_to_delete.add(key)
+        
+        # Filter out existing records that match the deletion criteria
+        deleted_count = 0
+        filtered_existing_rows = []
+        for row in existing_rows:
+            key = (
+                row.get("client_id", ""),
+                row.get("broker_id", ""),
+                row.get("hkt_datetime", "")
+            )
+            if key in new_keys_to_delete:
+                # This record should be deleted
+                deleted_count += 1
+            else:
+                # Keep this record
+                filtered_existing_rows.append(row)
+        
+        # Add all new rows
+        final_rows = filtered_existing_rows + new_rows
+        added_count = len(new_rows)
+        
+        # Write all records back to file with UTF-8-BOM for better Excel compatibility with Chinese characters
+        # Using utf-8-sig adds a BOM (Byte Order Mark) which helps Excel detect UTF-8 encoding
+        try:
+            # Try UTF-8-SIG first (best for modern Excel and international use)
+            with open(report_file, 'w', encoding='utf-8-sig', newline='') as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
+                writer.writeheader()
+                writer.writerows(final_rows)
+        except UnicodeEncodeError:
+            # Fallback to GB2312 if UTF-8 fails (for Chinese Windows Excel)
+            logging.warning("UTF-8 encoding failed, trying GB2312 for Chinese Excel compatibility")
+            with open(report_file, 'w', encoding='gb2312', newline='', errors='ignore') as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
+                writer.writeheader()
+                writer.writerows(final_rows)
+        
+        # Build status message
+        status_msg = f"✅ Report saved to {report_file} (UTF-8 encoding)\n"
+        status_msg += f"   📝 Added: {added_count} new record(s)\n"
+        status_msg += f"   🗑️ Deleted: {deleted_count} old record(s) with same client_id + broker_id + hkt_datetime\n"
+        status_msg += f"   📊 Total records in report: {len(final_rows)}"
+        
+        return status_msg
+        
+    except Exception as e:
+        error_msg = f"❌ Error saving to report.csv: {str(e)}\n{traceback.format_exc()}"
+        logging.error(error_msg)
+        return error_msg
+
+
 def verify_transactions(
     transaction_json: str,
-    metadata_json: str,
     trades_file_path: str,
     time_window: float,
-) -> tuple[str, str, str, str]:
+) -> tuple[str, str, str, str, str]:
     """
     Main function to verify transactions against trade records
     
     Returns:
-        tuple: (formatted_text_result, json_analysis_result, csv_records_json, all_client_records_json)
+        tuple: (formatted_text_result, json_analysis_result, csv_records_json, all_client_records_json, report_status)
     """
     try:
         # Parse transaction JSON
         if not transaction_json.strip():
             error_msg = "❌ Error: Please provide transaction analysis JSON"
-            return (error_msg, "", "", "")
+            return (error_msg, "", "", "", "")
         
         try:
             transaction_data = json.loads(transaction_json)
         except json.JSONDecodeError as e:
             error_msg = f"❌ Error: Cannot parse transaction JSON: {str(e)}"
-            return (error_msg, "", "", "")
-        
-        # Parse metadata JSON
-        if not metadata_json.strip():
-            error_msg = "❌ Error: Please provide metadata JSON"
-            return (error_msg, "", "", "")
-        
-        try:
-            metadata = json.loads(metadata_json)
-            # Extract metadata if it's nested
-            if "metadata" in metadata:
-                metadata = metadata["metadata"]
-        except json.JSONDecodeError as e:
-            error_msg = f"❌ Error: Cannot parse metadata JSON: {str(e)}"
-            return (error_msg, "", "", "")
+            return (error_msg, "", "", "", "")
         
         # Extract transactions list
         transactions = transaction_data.get("transactions", [])
         
         if len(transactions) == 0:
             error_msg = "❌ No transactions found in the transaction analysis JSON"
-            return (error_msg, "", "", "")
+            return (error_msg, "", "", "", "")
+        
+        # Extract metadata from first transaction
+        first_transaction = transactions[0]
+        metadata = {
+            "client_id": first_transaction.get("client_id", "N/A"),
+            "client_name": first_transaction.get("client_name", "N/A"),
+            "broker_id": first_transaction.get("broker_id", "N/A"),
+            "broker_name": first_transaction.get("broker_name", "N/A"),
+            "hkt_datetime": first_transaction.get("hkt_datetime", "N/A"),
+            "conversation_number": first_transaction.get("conversation_number", "N/A")
+        }
         
         # Verify trades file exists
         if not os.path.exists(trades_file_path):
             error_msg = f"❌ Error: Trades file not found: {trades_file_path}"
-            return (error_msg, "", "", "")
+            return (error_msg, "", "", "", "")
         
         # Build results structures
         results_text = f"""{'='*80}
@@ -515,8 +672,11 @@ def verify_transactions(
 📂 Trades File: {trades_file_path}
 ⏰ Time Window: ±{time_window} hours
 👤 Client ID: {metadata.get('client_id', 'N/A')}
+👤 Client Name: {metadata.get('client_name', 'N/A')}
 👔 Broker ID: {metadata.get('broker_id', 'N/A')}
+👔 Broker Name: {metadata.get('broker_name', 'N/A')}
 📅 HKT DateTime: {metadata.get('hkt_datetime', 'N/A')}
+🔢 Conversation Number: {metadata.get('conversation_number', 'N/A')}
 
 {'='*80}
 📊 FOUND {len(transactions)} TRANSACTION(S) TO VERIFY
@@ -531,8 +691,11 @@ def verify_transactions(
                 "trades_file": trades_file_path,
                 "time_window_hours": time_window,
                 "client_id": metadata.get('client_id', 'N/A'),
+                "client_name": metadata.get('client_name', 'N/A'),
                 "broker_id": metadata.get('broker_id', 'N/A'),
+                "broker_name": metadata.get('broker_name', 'N/A'),
                 "hkt_datetime": metadata.get('hkt_datetime', 'N/A'),
+                "conversation_number": metadata.get('conversation_number', 'N/A'),
                 "total_transactions": len(transactions)
             },
             "transaction_verifications": []
@@ -718,7 +881,10 @@ def verify_transactions(
         csv_records_str = json.dumps(csv_records, indent=2, ensure_ascii=False)
         all_client_records_str = json.dumps(all_client_records_data, indent=2, ensure_ascii=False)
         
-        return (results_text, json_analysis_str, csv_records_str, all_client_records_str)
+        # Save to report.csv
+        report_status = save_to_report_csv(json_analysis, metadata, "report.csv")
+        
+        return (results_text, json_analysis_str, csv_records_str, all_client_records_str, report_status)
         
     except Exception as e:
         error_msg = f"❌ Error: {str(e)}\n\nDetails:\n{traceback.format_exc()}"
@@ -728,67 +894,21 @@ def verify_transactions(
             "traceback": traceback.format_exc()
         }
         error_json_str = json.dumps(error_json, indent=2, ensure_ascii=False)
-        return (error_msg, error_json_str, "", "")
+        return (error_msg, error_json_str, "", "", "")
 
 
 def create_trade_verification_tab():
     """Create and return the Trade Verification tab"""
     with gr.Tab("🔍 Trade Verification"):
-        gr.Markdown(
-            """
-            ### 交易記錄核對 - Verify Transactions Against Trade Records
-            
-            This tool matches transactions identified from call recordings against actual trade records in `trades.csv`.
-            
-            **Primary Filtering (Required):**
-            - ✅ **Client ID**: ACCode column must match client_id
-            - ✅ **Date Match**: DATE in hkt_datetime must match DATE in OrderTime (time is ignored for this filter)
-            
-            **Additional Matching Criteria:**
-            - ✅ **Time Window**: Further filters records within ±X hours for detailed matching
-            - ✅ **Broker ID**: AECode column matches broker_id (e.g., CK489 matches 0489)
-            - ✅ **Stock Code**: SCTYCode column matches stock_code
-            - ✅ **Stock Name**: 🆕 Uses embedding similarity to match stock names (handles STT errors)
-            - ✅ **Order Side**: 'A' = Sell (Ask), 'B' = Buy (Bid)
-            - ✅ **Quantity**: OrderQty column matches quantity
-            - ✅ **Price**: OrderPrice column matches price
-            
-            **🆕 Stock Name Similarity (NEW):**
-            - Uses AI embeddings to compute semantic similarity between stock names
-            - Helps identify matches even when STT mis-transcribes stock codes
-            - High similarity (≥0.8) suggests likely match despite code mismatch
-            - Useful for handling homophone errors in Cantonese speech recognition
-            
-            **DateTime Handling:**
-            - Each transaction can have its own `hkt_datetime` field
-            - Only records with matching DATE (ignoring time) and client_id are considered
-            - Time window then further filters these date-matched records
-            - Falls back to metadata `hkt_datetime` if transaction doesn't have one
-            
-            **Output:**
-            - Shows all potential matching records
-            - Highlights what matches ✅ and what doesn't ❌
-            - Provides confidence score (0-100%) for each match
-            - Shows stock name similarity scores to identify possible transcription errors
-            """
-        )
-        
         with gr.Row():
             with gr.Column(scale=1):
                 gr.Markdown("#### 📥 Input Data")
                 
                 transaction_json_box = gr.Textbox(
                     label="Transaction Analysis JSON",
-                    placeholder='{\n  "transactions": [\n    {\n      "transaction_type": "buy",\n      "confidence_score": 2.0,\n      "hkt_datetime": "2025-10-20T10:15:30",\n      "stock_code": "18138",\n      ...\n    }\n  ],\n  ...\n}',
-                    lines=15,
-                    info="Paste the JSON output from Transaction Analysis tab (with hkt_datetime for each transaction)"
-                )
-                
-                metadata_json_box = gr.Textbox(
-                    label="Call Metadata JSON",
-                    placeholder='{\n  "metadata": {\n    "filename": "...",\n    "broker_id": "0489",\n    "client_id": "P77197",\n    "hkt_datetime": "2025-10-20T10:01:20",\n    ...\n  }\n}',
-                    lines=12,
-                    info="Provide client/broker information and call datetime"
+                    placeholder='{\n  "transactions": [\n    {\n      "transaction_type": "buy",\n      "confidence_score": 0.95,\n      "conversation_number": 1,\n      "hkt_datetime": "2025-10-20T10:01:20",\n      "broker_id": "0489",\n      "broker_name": "Dickson Lau",\n      "client_id": "P77197",\n      "client_name": "CHENG SUK HING",\n      "stock_code": "18138",\n      "stock_name": "腾讯认购证",\n      "quantity": "20000",\n      "price": "0.38",\n      "explanation": "..."\n    }\n  ]\n}',
+                    lines=20,
+                    info="Paste the JSON output from Transaction Analysis tab (metadata is extracted from each transaction)"
                 )
                 
                 gr.Markdown("#### ⚙️ Settings")
@@ -848,13 +968,20 @@ def create_trade_verification_tab():
                     show_copy_button=True,
                     info="ALL records found for this client in trades.csv (regardless of time window or matching criteria)"
                 )
+                
+                report_status_box = gr.Textbox(
+                    label="📊 Report.csv Save Status",
+                    lines=5,
+                    interactive=False,
+                    show_copy_button=False,
+                    info="Status of saving verification results to report.csv"
+                )
         
         # Connect the button
         verify_btn.click(
             fn=verify_transactions,
             inputs=[
                 transaction_json_box,
-                metadata_json_box,
                 trades_file_box,
                 time_window_slider,
             ],
@@ -863,6 +990,7 @@ def create_trade_verification_tab():
                 json_analysis_box,
                 csv_records_box,
                 all_client_records_box,
+                report_status_box,
             ],
         )
 

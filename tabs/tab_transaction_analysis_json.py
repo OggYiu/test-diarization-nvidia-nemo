@@ -46,6 +46,26 @@ class Transaction(BaseModel):
         description="The Hong Kong datetime when the conversation/transaction occurred"
     )
     
+    broker_id: Optional[str] = Field(
+        default=None,
+        description="The broker ID from the conversation metadata"
+    )
+    
+    broker_name: Optional[str] = Field(
+        default=None,
+        description="The broker name from the conversation metadata"
+    )
+    
+    client_id: Optional[str] = Field(
+        default=None,
+        description="The client ID from the conversation metadata"
+    )
+    
+    client_name: Optional[str] = Field(
+        default=None,
+        description="The client name from the conversation metadata"
+    )
+    
     stock_code: Optional[str] = Field(
         default=None,
         description="The stock code/number identified in the conversation"
@@ -333,7 +353,11 @@ DEFAULT_SYSTEM_MESSAGE = """你是一位精通粵語的香港股市分析師，�
       "transaction_type": "buy",  // 必須是 "buy", "sell", 或 "queue"
       "confidence_score": 0.85,   // 必須是數字 0.0-1.0，不能是字符串
       "conversation_number": 1,   // 必須是整數，表示該交易來自哪個對話
-      "hkt_datetime": "2025-10-20T10:15:30",  // 對話的日期時間（從對話元數據獲取），用於匹配交易記錄
+      "hkt_datetime": "2025-10-20T10:15:30",  // 對話的日期時間（系統自動從元數據提取）
+      "broker_id": "B001",        // 經紀ID（系統自動從元數據提取）
+      "broker_name": "Dickson Lau",  // 經紀姓名（系統自動從元數據提取）
+      "client_id": "C123",        // 客戶ID（系統自動從元數據提取）
+      "client_name": "CHENG SUK HING",  // 客戶姓名（系統自動從元數據提取）
       "stock_code": "0700",
       "stock_name": "騰訊控股",
       "quantity": "N/A",          // 如果從數據中無法確定
@@ -349,6 +373,7 @@ DEFAULT_SYSTEM_MESSAGE = """你是一位精通粵語的香港股市分析師，�
 - confidence_score 必須是數字（float），不能是字符串
 - conversation_number 必須是整數（int），表示該交易來自哪個對話
 - hkt_datetime 會自動從對話元數據中提取並添加（系統會自動處理）
+- broker_id, broker_name, client_id, client_name 會自動從對話元數據中提取並添加（系統會自動處理）
 - explanation 字段必須詳細說明判斷依據，**優先引用對話內容**，然後才是參考資料
 - conversation_analysis 必須詳細分析對話內容
 - overall_summary 必須基於對話內容為主，參考資料為輔
@@ -391,10 +416,14 @@ def analyze_transactions_with_json(
             error_msg = "❌ 錯誤：請指定 Ollama URL"
             return (error_msg, "")
         
-        # Parse conversation JSON to extract conversation text and datetime mapping
+        # Parse conversation JSON to extract conversation text and metadata mapping
         conversation_text = ""
         conversation_info = ""
         conversation_datetime_map = {}  # Map conversation_number -> hkt_datetime
+        conversation_broker_id_map = {}  # Map conversation_number -> broker_id
+        conversation_broker_name_map = {}  # Map conversation_number -> broker_name
+        conversation_client_id_map = {}  # Map conversation_number -> client_id
+        conversation_client_name_map = {}  # Map conversation_number -> client_name
         
         try:
             conversations = json.loads(conversation_json_input)
@@ -407,9 +436,18 @@ def analyze_transactions_with_json(
                 transcriptions = conv.get("transcriptions", {})
                 metadata = conv.get("metadata", {})
                 
-                # Extract datetime from metadata
+                # Extract metadata fields
                 hkt_datetime = metadata.get("hkt_datetime", "N/A")
+                broker_id = metadata.get("broker_id", "N/A")
+                broker_name = metadata.get("broker_name", "N/A")
+                client_id = metadata.get("client_id", "N/A")
+                client_name = metadata.get("client_name", "N/A")
+                
                 conversation_datetime_map[conv_number] = hkt_datetime
+                conversation_broker_id_map[conv_number] = broker_id
+                conversation_broker_name_map[conv_number] = broker_name
+                conversation_client_id_map[conv_number] = client_id
+                conversation_client_name_map[conv_number] = client_name
                 
                 # Extract transcription text
                 transcription_text = ""
@@ -600,7 +638,10 @@ def analyze_transactions_with_json(
 4. 識別對話中的交易意圖（買入/賣出/排隊）
 5. 提取交易細節（股票代號、股票名稱、數量、價格）
 6. **必須**為每個交易指定 conversation_number（從對話編號中獲取）
-7. **注意**：hkt_datetime 會自動從對話元數據中提取並添加到每個交易（系統會自動處理，不需要在返回的JSON中包含）
+7. **注意**：以下字段會自動從對話元數據中提取並添加到每個交易（系統會自動處理，不需要在返回的JSON中包含）：
+   - hkt_datetime（日期時間）
+   - broker_id, broker_name（經紀信息）
+   - client_id, client_name（客戶信息）
 8. 評估置信度分數（0.0-1.0）：
    - 基於對話內容的清晰度
    - 參考資料的元數據可作為輔助參考
@@ -650,13 +691,21 @@ def analyze_transactions_with_json(
             conversation_analysis = result_dict.get("conversation_analysis", "")
             overall_summary = result_dict.get("overall_summary", "")
             
-            # Programmatically add hkt_datetime to each transaction based on conversation_number
+            # Programmatically add metadata to each transaction based on conversation_number
             for tx in transactions:
                 conv_num = tx.get("conversation_number", None)
-                if conv_num and conv_num in conversation_datetime_map:
-                    tx["hkt_datetime"] = conversation_datetime_map[conv_num]
+                if conv_num:
+                    tx["hkt_datetime"] = conversation_datetime_map.get(conv_num, "N/A")
+                    tx["broker_id"] = conversation_broker_id_map.get(conv_num, "N/A")
+                    tx["broker_name"] = conversation_broker_name_map.get(conv_num, "N/A")
+                    tx["client_id"] = conversation_client_id_map.get(conv_num, "N/A")
+                    tx["client_name"] = conversation_client_name_map.get(conv_num, "N/A")
                 else:
                     tx["hkt_datetime"] = "N/A"
+                    tx["broker_id"] = "N/A"
+                    tx["broker_name"] = "N/A"
+                    tx["client_id"] = "N/A"
+                    tx["client_name"] = "N/A"
             
             # Count conversations
             try:
@@ -698,11 +747,21 @@ def analyze_transactions_with_json(
                         "unknown": "未知 ❓"
                     }.get(tx_type, tx_type)
                     
+                    # Get broker and client info from transaction
+                    tx_broker_id = tx.get("broker_id", "N/A")
+                    tx_broker_name = tx.get("broker_name", "N/A")
+                    tx_client_id = tx.get("client_id", "N/A")
+                    tx_client_name = tx.get("client_name", "N/A")
+                    
                     summary_result += f"""{'─'*50}
 交易 #{idx}
 {'─'*50}
 📅 日期時間 (HKT): {tx_datetime}
 💬 對話編號: {tx_conv_num if tx_conv_num else 'N/A'}
+👤 經紀ID: {tx_broker_id}
+👔 經紀姓名: {tx_broker_name}
+🆔 客戶ID: {tx_client_id}
+👥 客戶姓名: {tx_client_name}
 🔖 交易類型: {tx_type_display}
 ⭐ 置信度分數: {tx_conf} / 1.0
 📈 股票代號: {tx_code}
@@ -756,7 +815,9 @@ def create_transaction_analysis_json_tab():
     "conversation_number": 1,
     "filename": "example.wav",
     "metadata": {
+      "broker_id": "B001",
       "broker_name": "Dickson Lau",
+      "client_id": "C123",
       "client_name": "CHENG SUK HING",
       "hkt_datetime": "2025-10-20T10:15:30"
     },

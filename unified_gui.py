@@ -51,8 +51,8 @@ def create_unified_interface():
             # create_milvus_search_tab()
             # create_transaction_stock_search_tab()
             create_trade_verification_tab()
-            create_csv_stock_enrichment_tab()
             create_conversation_record_analysis_tab()
+            create_csv_stock_enrichment_tab()
             # create_text_correction_tab()
             # create_llm_chat_tab()
     

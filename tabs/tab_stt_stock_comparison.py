@@ -8,6 +8,7 @@ import json
 import traceback
 import logging
 import time
+import re
 from typing import List, Optional
 from datetime import datetime
 from collections import Counter
@@ -84,6 +85,135 @@ class ConversationStockExtraction(BaseModel):
     summary: str = Field(
         description="Brief summary of the conversation context"
     )
+
+
+# ============================================================================
+# Utility Functions
+# ============================================================================
+
+def convert_chinese_number_to_digit(text: str) -> str:
+    """
+    Convert Chinese numerals and text quantities to numeric digits.
+    
+    Examples:
+        "一千" -> "1000"
+        "兩萬" -> "20000"
+        "10手" -> "10"
+        "1000股" -> "1000"
+        "三百五十" -> "350"
+        "5萬股" -> "50000"
+        
+    Args:
+        text: Input text containing numbers (Chinese or Arabic)
+        
+    Returns:
+        str: Numeric value as string, or empty string if conversion fails
+    """
+    if not text:
+        return ""
+    
+    # Convert to string if not already
+    text = str(text).strip()
+    
+    # If already a pure number, return it
+    if text.isdigit():
+        return text
+    
+    # Try to match pure decimal numbers (including floats)
+    pure_number_match = re.match(r'^(\d+(?:\.\d+)?)$', text)
+    if pure_number_match:
+        try:
+            return str(int(float(pure_number_match.group(1))))
+        except:
+            return pure_number_match.group(1)
+    
+    # Chinese number mappings
+    chinese_digits = {
+        '零': 0, '〇': 0,
+        '一': 1, '壹': 1,
+        '二': 2, '貳': 2, '兩': 2, '两': 2,
+        '三': 3, '參': 3, '叁': 3,
+        '四': 4, '肆': 4,
+        '五': 5, '伍': 5,
+        '六': 6, '陸': 6,
+        '七': 7, '柒': 7,
+        '八': 8, '捌': 8,
+        '九': 9, '玖': 9,
+    }
+    
+    chinese_units = {
+        '十': 10, '拾': 10,
+        '百': 100, '佰': 100,
+        '千': 1000, '仟': 1000,
+        '萬': 10000, '万': 10000,
+        '億': 100000000, '亿': 100000000,
+    }
+    
+    # Try to extract existing Arabic numerals first
+    arabic_match = re.search(r'(\d+(?:\.\d+)?)', text)
+    if arabic_match:
+        num_str = arabic_match.group(1)
+        # Check if there's a Chinese unit after the number (e.g., "5萬")
+        remaining = text[arabic_match.end():]
+        for unit_char, unit_val in chinese_units.items():
+            if unit_char in remaining:
+                try:
+                    return str(int(float(num_str) * unit_val))
+                except:
+                    pass
+        # Return just the numeric part, removing any non-numeric characters
+        try:
+            return str(int(float(num_str)))
+        except:
+            return num_str
+    
+    # Convert pure Chinese numerals
+    try:
+        # Remove common suffixes like 股, 手, 張, etc.
+        cleaned = re.sub(r'[股手張张块塊元蚊]', '', text).strip()
+        
+        if not any(c in cleaned for c in chinese_digits.keys() | chinese_units.keys()):
+            # No Chinese numerals found, return empty string instead of original text
+            logging.warning(f"No numeric value found in '{text}'")
+            return ""
+        
+        total = 0
+        current = 0
+        
+        i = 0
+        while i < len(cleaned):
+            char = cleaned[i]
+            
+            if char in chinese_digits:
+                current = chinese_digits[char]
+                i += 1
+            elif char in chinese_units:
+                unit = chinese_units[char]
+                if unit >= 10000:  # 萬 or 億
+                    total = (total + current) * unit
+                    current = 0
+                else:  # 十, 百, 千
+                    if current == 0:
+                        current = 1  # Handle cases like "十" meaning "10"
+                    total += current * unit
+                    current = 0
+                i += 1
+            else:
+                i += 1
+        
+        total += current
+        
+        # If total is still 0, return empty string instead of original text
+        if total <= 0:
+            logging.warning(f"Failed to convert Chinese number '{text}' - total is 0")
+            return ""
+            
+        return str(int(total))
+        
+    except Exception as e:
+        logging.warning(f"Failed to convert Chinese number '{text}': {e}")
+        # Return empty string instead of original text
+        return ""
 
 
 # ============================================================================
@@ -218,6 +348,11 @@ def extract_stocks_with_single_llm(
         # Parse the response
         try:
             parsed_result: ConversationStockExtraction = parser.parse(response_content)
+            
+            # Convert quantities to numeric format
+            for stock in parsed_result.stocks:
+                if stock.quantity:
+                    stock.quantity = convert_chinese_number_to_digit(stock.quantity)
             
             # Apply vector store correction if enabled
             if use_vector_correction:

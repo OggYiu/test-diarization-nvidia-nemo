@@ -7,9 +7,10 @@ import json
 import csv
 import traceback
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict
 import gradio as gr
 import os
+import logging
 
 from pydantic import BaseModel, Field
 from langchain_ollama import ChatOllama
@@ -363,6 +364,164 @@ Then provide:
         }
 
 
+def save_to_verify_csv(
+    analysis_result: Dict,
+    trade_records: list[dict],
+    metadata: Dict,
+    verify_file: str = "verify.csv"
+) -> str:
+    """
+    Save conversation record analysis results to verify.csv with UTF-8 encoding.
+    
+    Args:
+        analysis_result: The analysis result dict from analyze_records_with_llm
+        trade_records: The original trade records that were analyzed
+        metadata: Dict with client_id, date, model info
+        verify_file: Path to the verify CSV file
+    
+    Returns:
+        Status message
+    """
+    try:
+        # Prepare rows to write
+        new_rows = []
+        
+        client_id = metadata.get("client_id", "N/A")
+        date_analyzed = metadata.get("date", "N/A")
+        model_name = metadata.get("model", "N/A")
+        
+        # Create a map of OrderNo to trade record for quick lookup
+        trade_map = {record.get("OrderNo", ""): record for record in trade_records}
+        
+        # Process each analyzed record
+        for record_analysis in analysis_result.get("records_analyzed", []):
+            order_no = record_analysis.get("order_no", "N/A")
+            confidence_score = record_analysis.get("confidence_score", 0.0)
+            reasoning = record_analysis.get("reasoning", "").replace("\n", " ")
+            
+            # Get trade record details
+            trade_record = trade_map.get(order_no, {})
+            order_time = trade_record.get("OrderTime", "N/A")
+            stock_code = trade_record.get("SCTYCode", "N/A")
+            stock_name = trade_record.get("stock_name", "N/A")
+            order_side = trade_record.get("OrderSide", "N/A")
+            quantity = trade_record.get("OrderQty", "N/A")
+            price = trade_record.get("OrderPrice", "N/A")
+            status = trade_record.get("OrderStatus", "N/A")
+            
+            # Determine verification status based on confidence
+            if confidence_score >= 0.8:
+                verification_status = "High Confidence"
+            elif confidence_score >= 0.5:
+                verification_status = "Medium Confidence"
+            else:
+                verification_status = "Low Confidence"
+            
+            # Create row
+            row = {
+                "client_id": client_id,
+                "date_analyzed": date_analyzed,
+                "order_no": order_no,
+                "order_time": order_time,
+                "stock_code": stock_code,
+                "stock_name": stock_name,
+                "order_side": order_side,
+                "quantity": quantity,
+                "price": price,
+                "order_status": status,
+                "confidence_score": f"{confidence_score:.2f}",
+                # "verification_status": verification_status,
+                "reasoning": reasoning,
+                # "model": model_name,
+            }
+            new_rows.append(row)
+        
+        if not new_rows:
+            return "⚠️ No records to save to verify.csv"
+        
+        # Define CSV columns
+        fieldnames = [
+            "client_id",
+            "date_analyzed",
+            "order_no",
+            "order_time",
+            "stock_code",
+            "stock_name",
+            "order_side",
+            "quantity",
+            "price",
+            "order_status",
+            "confidence_score",
+            "verification_status",
+            "reasoning",
+            "model",
+        ]
+        
+        # Read existing records if file exists
+        existing_rows = []
+        file_exists = os.path.exists(verify_file)
+        
+        if file_exists:
+            try:
+                with open(verify_file, 'r', encoding='utf-8-sig', newline='') as f:
+                    reader = csv.DictReader(f)
+                    existing_rows = list(reader)
+            except Exception as e:
+                logging.warning(f"Could not read existing verify.csv: {e}")
+        
+        # Determine which records to delete based on (client_id, date_analyzed)
+        new_keys_to_delete = set()
+        for new_row in new_rows:
+            key = (
+                new_row["client_id"],
+                new_row["date_analyzed"]
+            )
+            new_keys_to_delete.add(key)
+        
+        # Filter out existing records that match the deletion criteria
+        deleted_count = 0
+        filtered_existing_rows = []
+        for row in existing_rows:
+            key = (
+                row.get("client_id", ""),
+                row.get("date_analyzed", "")
+            )
+            if key in new_keys_to_delete:
+                deleted_count += 1
+            else:
+                filtered_existing_rows.append(row)
+        
+        # Add all new rows
+        final_rows = filtered_existing_rows + new_rows
+        added_count = len(new_rows)
+        
+        # Write all records back to file with UTF-8-BOM
+        try:
+            with open(verify_file, 'w', encoding='utf-8-sig', newline='') as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
+                writer.writeheader()
+                writer.writerows(final_rows)
+        except UnicodeEncodeError:
+            logging.warning("UTF-8 encoding failed, trying GB2312 for Chinese Excel compatibility")
+            with open(verify_file, 'w', encoding='gb2312', newline='', errors='ignore') as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
+                writer.writeheader()
+                writer.writerows(final_rows)
+        
+        # Build status message
+        status_msg = f"✅ Results saved to {verify_file} (UTF-8 encoding)\n"
+        status_msg += f"   📝 Added: {added_count} new record(s)\n"
+        status_msg += f"   🗑️ Deleted: {deleted_count} old record(s) with same client_id + date\n"
+        status_msg += f"   📊 Total records in file: {len(final_rows)}"
+        
+        return status_msg
+        
+    except Exception as e:
+        error_msg = f"❌ Error saving to verify.csv: {str(e)}\n{traceback.format_exc()}"
+        logging.error(error_msg)
+        return error_msg
+
+
 def analyze_conversation_records(
     conversation_json: str,
     trades_file_path: str,
@@ -371,7 +530,7 @@ def analyze_conversation_records(
     ollama_url: str,
     temperature: float,
     use_combined_analysis: bool = False
-) -> tuple[str, str]:
+) -> tuple[str, str, str]:
     """
     Main function to analyze trade records against conversation
     
@@ -385,7 +544,7 @@ def analyze_conversation_records(
         use_combined_analysis: If True and input is array, analyze all conversations combined
     
     Returns:
-        tuple: (formatted_text_result, json_result)
+        tuple: (formatted_text_result, json_result, csv_save_status)
     """
     try:
         # Parse conversation JSON
@@ -635,7 +794,28 @@ Example:
         
         json_output_str = json.dumps(json_output, indent=2, ensure_ascii=False, default=str)
         
-        return (output_text, json_output_str)
+        # Save to verify.csv
+        # Extract the earliest OrderTime from trade records for date_analyzed
+        trade_datetime = None
+        if trade_records:
+            for record in trade_records:
+                order_time_str = record.get("OrderTime", "")
+                order_dt = parse_datetime(order_time_str)
+                if order_dt:
+                    if trade_datetime is None or order_dt < trade_datetime:
+                        trade_datetime = order_dt
+        
+        # Use the trade datetime if found, otherwise fall back to target_date
+        date_analyzed_value = trade_datetime.strftime("%Y-%m-%d %H:%M:%S") if trade_datetime else target_date.isoformat()
+        
+        csv_metadata = {
+            "client_id": client_id if client_id else "All",
+            "date": date_analyzed_value,
+            "model": model_name
+        }
+        csv_save_status = save_to_verify_csv(analysis_result, trade_records, csv_metadata, "verify.csv")
+        
+        return (output_text, json_output_str, csv_save_status)
         
     except Exception as e:
         error_msg = f"❌ Error: {str(e)}\n\nDetails:\n{traceback.format_exc()}"
@@ -645,46 +825,12 @@ Example:
             "traceback": traceback.format_exc()
         }
         error_json_str = json.dumps(error_json, indent=2, ensure_ascii=False)
-        return (error_msg, error_json_str)
+        return (error_msg, error_json_str, f"❌ CSV save skipped due to error")
 
 
 def create_conversation_record_analysis_tab():
     """Create and return the Conversation Record Analysis tab"""
     with gr.Tab("🎯 Conversation Record Analysis"):
-        gr.Markdown(
-            """
-            ### 對話記錄分析 - Analyze Trade Records Against Conversation
-            
-            This tool takes a conversation transcript and analyzes all trade records from that date to determine 
-            which trades were actually discussed in the conversation.
-            
-            **How it works:**
-            1. 📝 Paste your conversation JSON (must include `hkt_datetime`)
-            2. 📅 Tool extracts the date and loads all trades from that day
-            3. 🤖 LLM analyzes each trade record to determine confidence (0.0-1.0)
-            4. 📊 Get detailed analysis with confidence scores and reasoning
-            
-            **Confidence Scores:**
-            - `1.0`: Definitely mentioned with clear confirmation
-            - `0.7-0.9`: Strong evidence, likely mentioned
-            - `0.4-0.6`: Some evidence but not clear
-            - `0.1-0.3`: Possibly related but very uncertain
-            - `0.0`: Definitely NOT mentioned
-            
-            **Use Cases:**
-            - Verify that executed trades were actually authorized in the call
-            - Identify unauthorized or suspicious trades
-            - Check compliance and audit trails
-            - Analyze broker-client communication patterns
-            
-            **💡 New Feature: Combined Analysis**
-            - When input is an array of conversations, enable "Combined Analysis" to analyze all conversations together
-            - This is useful when conversations are related (same day, same client)
-            - Context from conversation 1 can help analyze trades mentioned in conversation 2
-            - Example: Stock mentioned in call #1 may be referred to as "that stock" in call #2
-            """
-        )
-        
         with gr.Row():
             with gr.Column(scale=1):
                 gr.Markdown("#### 📥 Input")
@@ -698,7 +844,7 @@ def create_conversation_record_analysis_tab():
                 
                 combined_analysis_checkbox = gr.Checkbox(
                     label="🔗 Enable Combined Analysis",
-                    value=False,
+                    value=True,
                     info="When input is an array, analyze ALL conversations together as one unified context (recommended for related conversations)"
                 )
                 
@@ -751,14 +897,21 @@ def create_conversation_record_analysis_tab():
                 
                 results_box = gr.Textbox(
                     label="Analysis Results (Formatted Text)",
-                    lines=25,
+                    lines=20,
                     interactive=False,
                     show_copy_button=True,
                 )
                 
+                csv_status_box = gr.Textbox(
+                    label="CSV Export Status",
+                    lines=3,
+                    interactive=False,
+                    info="Status of saving results to verify.csv"
+                )
+                
                 json_output_box = gr.Textbox(
                     label="Complete Analysis (JSON Format)",
-                    lines=25,
+                    lines=20,
                     interactive=False,
                     show_copy_button=True,
                     info="Complete analysis including all trade records and confidence scores"
@@ -779,6 +932,7 @@ def create_conversation_record_analysis_tab():
             outputs=[
                 results_box,
                 json_output_box,
+                csv_status_box,
             ],
         )
 
