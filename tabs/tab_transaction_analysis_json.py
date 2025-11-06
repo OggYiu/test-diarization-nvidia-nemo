@@ -10,6 +10,7 @@ import gradio as gr
 
 from pydantic import BaseModel, Field
 from langchain_ollama import ChatOllama
+from opencc import OpenCC
 
 # Import centralized model configuration
 from model_config import MODEL_OPTIONS, DEFAULT_MODEL, DEFAULT_OLLAMA_URL
@@ -21,6 +22,37 @@ from tabs.tab_stt_stock_comparison import (
     LLM_OPTIONS,
 )
 
+
+# ============================================================================
+# OpenCC Translation Setup
+# ============================================================================
+
+# Initialize OpenCC converter (Simplified to Traditional Chinese)
+opencc_converter = OpenCC('s2t')  # s2t = Simplified to Traditional
+
+def translate_to_traditional_chinese(text: str) -> str:
+    """
+    Convert Simplified Chinese text to Traditional Chinese using OpenCC.
+    
+    Args:
+        text: Input text (may contain Simplified Chinese)
+        
+    Returns:
+        str: Text with Simplified Chinese converted to Traditional Chinese
+    """
+    if not text or not text.strip():
+        return text
+    
+    try:
+        return opencc_converter.convert(text)
+    except Exception as e:
+        print(f"OpenCC translation failed: {e}")
+        return text  # Return original text if translation fails
+
+
+# ============================================================================
+# Pydantic Models
+# ============================================================================
 
 # Pydantic models for structured transaction output
 class Transaction(BaseModel):
@@ -675,6 +707,9 @@ def analyze_transactions_with_json(
             response_content = getattr(resp, "content", str(resp))
         except Exception:
             response_content = str(resp)
+        
+        # Translate LLM response to Traditional Chinese
+        response_content = translate_to_traditional_chinese(response_content)
         
         # Try to parse as structured output
         try:

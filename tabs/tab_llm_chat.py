@@ -11,6 +11,9 @@ from langchain_ollama import ChatOllama
 # Import centralized model configuration
 from model_config import MODEL_OPTIONS, DEFAULT_MODEL, DEFAULT_OLLAMA_URL
 
+# Import OpenCC translation utility
+from opencc_utils import translate_to_traditional_chinese
+
 
 def send_to_llm(
     system_message: str,
@@ -66,6 +69,9 @@ def send_to_llm(
             response_content = getattr(resp, "content", str(resp))
         except Exception:
             response_content = str(resp)
+        
+        # Translate LLM response to Traditional Chinese
+        response_content = translate_to_traditional_chinese(response_content)
         
         # Format response with metadata
         result = f"⏱️ Response time: {elapsed_time:.2f}s\n"

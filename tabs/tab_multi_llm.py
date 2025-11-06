@@ -13,6 +13,9 @@ from langchain_ollama import ChatOllama
 # Import centralized model configuration
 from model_config import MODEL_OPTIONS, DEFAULT_OLLAMA_URL
 
+# Import OpenCC translation utility
+from opencc_utils import translate_to_traditional_chinese
+
 # Use MODEL_OPTIONS as LLM_OPTIONS for consistency with this module
 LLM_OPTIONS = MODEL_OPTIONS
 
@@ -61,6 +64,9 @@ def query_single_llm(
             response_content = getattr(resp, "content", str(resp))
         except Exception:
             response_content = str(resp)
+        
+        # Translate LLM response to Traditional Chinese
+        response_content = translate_to_traditional_chinese(response_content)
         
         return (model, f"✓ Success\n\n{response_content}")
         

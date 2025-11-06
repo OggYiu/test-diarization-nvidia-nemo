@@ -14,6 +14,10 @@ from langchain_ollama import ChatOllama
 
 # Import centralized model configuration
 from model_config import MODEL_OPTIONS, DEFAULT_MODEL, DEFAULT_OLLAMA_URL
+
+# Import OpenCC translation utility
+from opencc_utils import translate_to_traditional_chinese
+
 DEFAULT_SYSTEM_MESSAGE = (
     "你是一位精通粵語以及香港股市的分析師。請用繁體中文回應，"
     "並從下方對話中判斷誰是券商、誰是客戶，整理最終下單（股票代號、買/賣、價格、數量），"
@@ -57,6 +61,9 @@ def analyze_single_model(
             response_content = getattr(resp, "content", str(resp))
         except Exception:
             response_content = str(resp)
+        
+        # Translate LLM response to Traditional Chinese
+        response_content = translate_to_traditional_chinese(response_content)
         
         elapsed_time = time.time() - start_time
         

@@ -28,6 +28,9 @@ from stock_verifier_module.stock_verifier_improved import (
     SearchStrategy,
 )
 
+# Import OpenCC translation utility
+from opencc_utils import translate_to_traditional_chinese
+
 
 # ============================================================================
 # Pydantic Models for Structured Output
@@ -344,6 +347,9 @@ def extract_stocks_with_single_llm(
             response_content = getattr(resp, "content", str(resp))
         except Exception:
             response_content = str(resp)
+        
+        # Translate LLM response to Traditional Chinese
+        response_content = translate_to_traditional_chinese(response_content)
         
         # Parse the response
         try:

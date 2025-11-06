@@ -26,6 +26,9 @@ from tabs.tab_stt_stock_comparison import (
 # Import centralized model configuration
 from model_config import DEFAULT_OLLAMA_URL
 
+# Import OpenCC translation utility
+from opencc_utils import translate_to_traditional_chinese
+
 
 # ============================================================================
 # Utility Functions
@@ -401,6 +404,9 @@ Please analyze each stock and determine if it was really discussed in the conver
         if response.status_code == 200:
             result = response.json()
             llm_response = result.get("message", {}).get("content", "")
+            
+            # Translate LLM response to Traditional Chinese
+            llm_response = translate_to_traditional_chinese(llm_response)
             
             # Try to parse JSON from response
             try:

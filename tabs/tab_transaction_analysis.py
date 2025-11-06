@@ -14,6 +14,13 @@ from langchain_ollama import ChatOllama
 # Import centralized model configuration
 from model_config import MODEL_OPTIONS, DEFAULT_MODEL, DEFAULT_OLLAMA_URL
 
+# Import OpenCC translation utility
+from opencc_utils import translate_to_traditional_chinese
+
+
+# ============================================================================
+# Pydantic Models
+# ============================================================================
 
 # Pydantic models for structured transaction output
 class Transaction(BaseModel):
@@ -325,6 +332,9 @@ def analyze_transactions(
             response_content = getattr(resp, "content", str(resp))
         except Exception:
             response_content = str(resp)
+        
+        # Translate LLM response to Traditional Chinese
+        response_content = translate_to_traditional_chinese(response_content)
         
         # Try to parse as structured output
         try:
