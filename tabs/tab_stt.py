@@ -2090,7 +2090,7 @@ def create_stt_tab():
                     value="""[
   {
     "wrong_words": ["蚊"],
-    "correct_word": "元港幣"
+    "correct_word": "港幣"
   },
   {
     "wrong_words": ["毛", "號"],
@@ -2106,11 +2106,11 @@ def create_stt_tab():
   },
   {
     "wrong_words": ["掛"],
-    "correct_word": "掛單賣出"
+    "correct_word": "掛單"
   },
   {
     "wrong_words": ["排"],
-    "correct_word": "掛單買入"
+    "correct_word": "掛單"
   },
   {
     "wrong_words": ["輪"],

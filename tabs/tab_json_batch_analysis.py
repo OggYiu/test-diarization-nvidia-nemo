@@ -8,6 +8,7 @@ import json
 import traceback
 import logging
 import time
+import requests
 from typing import List, Dict, Any
 from datetime import datetime
 from collections import Counter
@@ -160,6 +161,141 @@ def create_merged_stocks_json(combined_results: List[Dict[str, Any]]) -> str:
     return json.dumps(merged_data, indent=2, ensure_ascii=False)
 
 
+def verify_stocks_in_conversations(
+    merged_stocks: List[Dict[str, Any]],
+    conversations: List[Dict[str, Any]],
+    verification_llm: str,
+    ollama_url: str,
+    temperature: float,
+) -> Dict[str, Any]:
+    """
+    Verify if extracted stocks really exist in the conversations using LLM analysis.
+    
+    Args:
+        merged_stocks: List of merged stocks to verify
+        conversations: Original conversation data
+        verification_llm: LLM model to use for verification
+        ollama_url: Ollama server URL
+        temperature: Temperature parameter
+        
+    Returns:
+        Dict with verification results for each stock
+    """
+    verification_results = []
+    
+    # Build a comprehensive conversation text
+    all_conversation_texts = []
+    for conv in conversations:
+        transcriptions = conv.get("transcriptions", {})
+        if isinstance(transcriptions, dict):
+            for source_name, text in transcriptions.items():
+                if text and text.strip():
+                    all_conversation_texts.append(f"[{source_name}]: {text}")
+                    break
+        elif isinstance(transcriptions, str) and transcriptions.strip():
+            all_conversation_texts.append(transcriptions)
+    
+    full_conversation_text = "\n\n---\n\n".join(all_conversation_texts)
+    
+    # Prepare verification prompt
+    stocks_list = []
+    for idx, stock in enumerate(merged_stocks, 1):
+        stock_name = stock.get("corrected_stock_name") or stock.get("stock_name", "N/A")
+        stock_number = stock.get("corrected_stock_number") or stock.get("stock_number", "N/A")
+        stocks_list.append(f"{idx}. {stock_name} ({stock_number})")
+    
+    verification_system_message = """You are a stock conversation verification analyst. Your task is to carefully review conversations and verify whether specific stocks were actually mentioned or discussed.
+
+For each stock provided, you need to:
+1. Search through the conversation text for any mention of the stock (by name, number, or alias)
+2. Determine if the stock was actually discussed or if it was incorrectly extracted
+3. Provide evidence (quote) from the conversation if found
+4. Assign a verification status: "CONFIRMED", "LIKELY", "UNCERTAIN", or "NOT_FOUND"
+
+Be thorough and look for:
+- Direct mentions of stock names or numbers
+- Cantonese/Chinese nicknames or abbreviations
+- Context clues that indicate the stock (e.g., "騰訊" for Tencent, "700" for 00700.HK)
+
+Respond ONLY with valid JSON in this format:
+{
+  "verification_results": [
+    {
+      "stock_number": "00700",
+      "stock_name": "騰訊控股",
+      "verification_status": "CONFIRMED|LIKELY|UNCERTAIN|NOT_FOUND",
+      "evidence": "quote from conversation that mentions this stock",
+      "reasoning": "explanation of why you gave this status"
+    }
+  ]
+}"""
+    
+    verification_prompt = f"""Please verify if the following stocks were actually mentioned in the conversations below:
+
+**STOCKS TO VERIFY:**
+{chr(10).join(stocks_list)}
+
+**CONVERSATIONS:**
+{full_conversation_text}
+
+Please analyze each stock and determine if it was really discussed in the conversations above. Respond with JSON only."""
+    
+    try:
+        # Call LLM for verification
+        response = requests.post(
+            f"{ollama_url}/api/chat",
+            json={
+                "model": verification_llm,
+                "messages": [
+                    {"role": "system", "content": verification_system_message},
+                    {"role": "user", "content": verification_prompt}
+                ],
+                "stream": False,
+                "options": {
+                    "temperature": temperature,
+                }
+            },
+            timeout=120
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            llm_response = result.get("message", {}).get("content", "")
+            
+            # Try to parse JSON from response
+            try:
+                # Extract JSON from response (handle cases where LLM adds extra text)
+                json_start = llm_response.find("{")
+                json_end = llm_response.rfind("}") + 1
+                if json_start >= 0 and json_end > json_start:
+                    json_str = llm_response[json_start:json_end]
+                    parsed_result = json.loads(json_str)
+                    verification_results = parsed_result.get("verification_results", [])
+            except json.JSONDecodeError as e:
+                logging.error(f"Failed to parse verification JSON: {e}")
+                logging.error(f"LLM Response: {llm_response}")
+        else:
+            logging.error(f"Verification LLM request failed: {response.status_code}")
+    
+    except Exception as e:
+        logging.error(f"Error during stock verification: {e}")
+        logging.error(traceback.format_exc())
+    
+    # Create verification map
+    verification_map = {}
+    for result in verification_results:
+        stock_number = result.get("stock_number", "")
+        if stock_number:
+            verification_map[stock_number] = result
+    
+    return {
+        "verification_results": verification_results,
+        "verification_map": verification_map,
+        "verification_llm": verification_llm,
+        "verification_timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }
+
+
 def process_json_batch(
     json_input: str,
     selected_llms: list[str],
@@ -168,7 +304,9 @@ def process_json_batch(
     temperature: float,
     use_vector_correction: bool = True,
     use_contextual_analysis: bool = True,
-) -> tuple[str, str, str]:
+    enable_stock_verification: bool = False,
+    verification_llm: str = None,
+) -> tuple[str, str, str, str]:
     """
     Process a JSON batch of conversations and extract stock information.
     
@@ -182,31 +320,31 @@ def process_json_batch(
         use_contextual_analysis: Whether to use previous conversation context for better analysis
         
     Returns:
-        tuple[str, str, str]: (formatted_results, combined_json, merged_json)
+        tuple[str, str, str, str]: (formatted_results, combined_json, merged_json, verification_results)
     """
     try:
         # Validate inputs
         if not json_input or not json_input.strip():
-            return "❌ Error: Please provide a JSON input", "", ""
+            return "❌ Error: Please provide a JSON input", "", "", ""
         
         if not selected_llms or len(selected_llms) == 0:
-            return "❌ Error: Please select at least one LLM", "", ""
+            return "❌ Error: Please select at least one LLM", "", "", ""
         
         if not ollama_url or not ollama_url.strip():
-            return "❌ Error: Please specify Ollama URL", "", ""
+            return "❌ Error: Please specify Ollama URL", "", "", ""
         
         # Parse JSON
         try:
             conversations = json.loads(json_input)
         except json.JSONDecodeError as e:
-            return f"❌ Error: Invalid JSON format\n\n{str(e)}", "", ""
+            return f"❌ Error: Invalid JSON format\n\n{str(e)}", "", "", ""
         
         # Validate that it's an array
         if not isinstance(conversations, list):
-            return "❌ Error: JSON must be an array of conversation objects", "", ""
+            return "❌ Error: JSON must be an array of conversation objects", "", "", ""
         
         if len(conversations) == 0:
-            return "❌ Error: JSON array is empty", "", ""
+            return "❌ Error: JSON array is empty", "", "", ""
         
         # Process each conversation
         all_results = []
@@ -405,14 +543,117 @@ def process_json_batch(
         combined_json = json.dumps(combined_results, indent=2, ensure_ascii=False)
         
         # Create merged JSON (deduplicated stocks with averaged relevance scores)
-        merged_json = create_merged_stocks_json(combined_results)
+        merged_json_data = json.loads(create_merged_stocks_json(combined_results))
+        merged_stocks = merged_json_data.get("stocks", [])
         
-        return "\n".join(output_parts), combined_json, merged_json
+        # Perform stock verification if enabled
+        verification_output = ""
+        if enable_stock_verification and verification_llm and merged_stocks:
+            verification_parts = []
+            verification_parts.append("=" * 100)
+            verification_parts.append("🔍 STOCK VERIFICATION ANALYSIS")
+            verification_parts.append(f"Verification LLM: {verification_llm}")
+            verification_parts.append(f"Total Stocks to Verify: {len(merged_stocks)}")
+            verification_parts.append("=" * 100)
+            verification_parts.append("")
+            verification_parts.append("Verifying if extracted stocks really exist in conversations...")
+            verification_parts.append("")
+            
+            try:
+                verification_result = verify_stocks_in_conversations(
+                    merged_stocks=merged_stocks,
+                    conversations=conversations,
+                    verification_llm=verification_llm,
+                    ollama_url=ollama_url,
+                    temperature=temperature
+                )
+                
+                verification_map = verification_result.get("verification_map", {})
+                
+                # Update merged stocks with verification status
+                for stock in merged_stocks:
+                    stock_number = stock.get("stock_number", "")
+                    if stock_number in verification_map:
+                        verification = verification_map[stock_number]
+                        stock["verification_status"] = verification.get("verification_status", "UNKNOWN")
+                        stock["verification_evidence"] = verification.get("evidence", "")
+                        stock["verification_reasoning"] = verification.get("reasoning", "")
+                    else:
+                        stock["verification_status"] = "NOT_VERIFIED"
+                
+                # Add verification metadata
+                merged_json_data["verification_metadata"] = {
+                    "verification_enabled": True,
+                    "verification_llm": verification_result.get("verification_llm"),
+                    "verification_timestamp": verification_result.get("verification_timestamp")
+                }
+                
+                # Display verification results
+                verification_parts.append("📋 VERIFICATION RESULTS:")
+                verification_parts.append("")
+                
+                # Group by verification status
+                status_groups = {
+                    "CONFIRMED": [],
+                    "LIKELY": [],
+                    "UNCERTAIN": [],
+                    "NOT_FOUND": []
+                }
+                
+                for stock in merged_stocks:
+                    status = stock.get("verification_status", "NOT_VERIFIED")
+                    if status in status_groups:
+                        status_groups[status].append(stock)
+                
+                # Display each group
+                for status, stocks_in_group in status_groups.items():
+                    if stocks_in_group:
+                        emoji_map = {
+                            "CONFIRMED": "✅",
+                            "LIKELY": "🟢",
+                            "UNCERTAIN": "🟡",
+                            "NOT_FOUND": "❌"
+                        }
+                        emoji = emoji_map.get(status, "❓")
+                        verification_parts.append(f"{emoji} {status}: {len(stocks_in_group)} stock(s)")
+                        
+                        for stock in stocks_in_group:
+                            stock_name = stock.get("corrected_stock_name") or stock.get("stock_name", "N/A")
+                            stock_number = stock.get("corrected_stock_number") or stock.get("stock_number", "N/A")
+                            evidence = stock.get("verification_evidence", "")
+                            reasoning = stock.get("verification_reasoning", "")
+                            
+                            verification_parts.append(f"   • {stock_name} ({stock_number})")
+                            if reasoning:
+                                verification_parts.append(f"     Reasoning: {reasoning}")
+                            if evidence:
+                                evidence_preview = evidence[:200] + "..." if len(evidence) > 200 else evidence
+                                verification_parts.append(f"     Evidence: \"{evidence_preview}\"")
+                        verification_parts.append("")
+                
+                verification_parts.append("=" * 100)
+                verification_parts.append("✓ VERIFICATION COMPLETED")
+                verification_parts.append("=" * 100)
+                
+                verification_output = "\n".join(verification_parts)
+                
+            except Exception as verify_error:
+                error_msg = f"❌ Verification Error: {str(verify_error)}"
+                verification_parts.append(error_msg)
+                verification_parts.append(f"Traceback: {traceback.format_exc()}")
+                verification_output = "\n".join(verification_parts)
+                logging.error(error_msg)
+                logging.error(traceback.format_exc())
+        
+        # Convert merged_json_data back to JSON string
+        merged_json = json.dumps(merged_json_data, indent=2, ensure_ascii=False)
+        
+        return "\n".join(output_parts), combined_json, merged_json, verification_output
         
     except Exception as e:
         error_msg = f"❌ Error: {str(e)}\n\nTraceback:\n{traceback.format_exc()}"
         logging.error(error_msg)
-        return error_msg, "", ""
+        return error_msg, "", "", ""
 
 
 # ============================================================================
@@ -467,6 +708,20 @@ def create_json_batch_analysis_tab():
                     label="🔧 Enable Vector Store Correction",
                     value=True,
                     info="Use Milvus vector store to correct stock names that may have STT errors"
+                )
+                
+                enable_stock_verification_checkbox = gr.Checkbox(
+                    label="🔍 Enable Stock Verification Analysis",
+                    value=False,
+                    info="Run an additional LLM round to verify if extracted stocks really exist in conversations"
+                )
+                
+                verification_llm_dropdown = gr.Dropdown(
+                    choices=LLM_OPTIONS,
+                    label="Verification LLM Model",
+                    value=LLM_OPTIONS[0],
+                    info="Select LLM model for stock verification (only used if verification is enabled)",
+                    interactive=True
                 )
                 
                 system_message_box = gr.Textbox(
@@ -528,6 +783,16 @@ def create_json_batch_analysis_tab():
                     show_copy_button=True,
                     info="All stocks merged and deduplicated by stock_number, with relevance scores averaged across all conversations and LLMs"
                 )
+                
+                gr.Markdown("#### 🔍 Stock Verification Results")
+                
+                verification_results_box = gr.Textbox(
+                    label="Stock Verification Analysis",
+                    lines=15,
+                    interactive=False,
+                    show_copy_button=True,
+                    info="Verification analysis results showing if extracted stocks really exist in conversations (only shown when verification is enabled)"
+                )
         
         # Connect the analyze button
         analyze_btn.click(
@@ -540,7 +805,9 @@ def create_json_batch_analysis_tab():
                 temperature_slider,
                 use_vector_correction_checkbox,
                 use_contextual_analysis_checkbox,
+                enable_stock_verification_checkbox,
+                verification_llm_dropdown,
             ],
-            outputs=[results_box, combined_json_box, merged_json_box],
+            outputs=[results_box, combined_json_box, merged_json_box, verification_results_box],
         )
 

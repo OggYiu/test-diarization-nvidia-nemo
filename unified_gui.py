@@ -1,34 +1,9 @@
-"""
-Unified Gradio GUI combining all phone call analysis tools:
-1. Speaker Diarization
-2. Batch Speech-to-Text
-3. LLM Analysis
-4. Speaker Separation
-5. Audio Enhancement
-6. LLM Comparison
-7. File Metadata
-8. Multi-LLM Query
-9. STT Stock Comparison
-10. Transcription Merger
-11. Transaction Analysis
-12. Milvus Vector Search
-13. Transaction Stock Search
-14. Trade Verification
-15. Text Correction
-16. Conversation Record Analysis
-
-Modular version - each tab is in a separate file in the tabs/ directory
-"""
-
 import gradio as gr
 
 # Import tab creation functions from the tabs module
 from tabs import (
-    # create_file_metadata_tab,
-    # create_diarization_tab,
     create_stt_tab,
     create_json_batch_analysis_tab,
-    # create_llm_analysis_tab,
     # create_speaker_separation_tab,
     # create_audio_enhancement_tab,
     # create_llm_comparison_tab,
@@ -42,8 +17,8 @@ from tabs import (
     create_trade_verification_tab,
     # create_text_correction_tab,
     # create_llm_chat_tab,
-    create_csv_stock_enrichment_tab,
     create_conversation_record_analysis_tab,
+    create_csv_stock_enrichment_tab,
 )
 
 
