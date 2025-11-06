@@ -1,0 +1,51 @@
+{
+  "conversation_number": 1,
+  "filename": "Dickson Lau 0489_3337-M9136_202510090930001108.wav",
+  "metadata": {
+    "filename": "Dickson Lau 0489_3337-M9136_202510090930001108.wav",
+    "broker_name": "Dickson Lau",
+    "broker_id": "0489",
+    "client_number": "M9136",
+    "client_name": "TEST CLIENT",
+    "client_id": "M9136",
+    "utc_datetime": "2025-10-09T01:30:00",
+    "hkt_datetime": "2025-10-09T09:30:00",
+    "timestamp": "2025-11-05 18:21:19"
+  },
+  "conversations": [
+    [
+      {
+        "speaker": "Broker",
+        "text": "喂，你好！"
+      },
+      {
+        "speaker": "Client", 
+        "text": "我想沽啲安東油田服務，三三三七。"
+      },
+      {
+        "speaker": "Broker",
+        "text": "安東油田服務，三三三七，沽幾多？"
+      },
+      {
+        "speaker": "Client",
+        "text": "兩萬股，一蚊二三沽。"
+      },
+      {
+        "speaker": "Broker",
+        "text": "好，兩萬股安東油田服務三三三七，一蚊二三沽，收到。"
+      },
+      {
+        "speaker": "Client",
+        "text": "係，唔該。"
+      }
+    ]
+  ],
+  "transcriptions": [
+    {
+      "model": "wsyue-asr",
+      "text": "喂你好我想沽啲安東油田服務三三三七。安東油田服務三三三七沽幾多？兩萬股一蚊二三沽。好兩萬股安東油田服務三三三七一蚊二三沽收到。係唔該。",
+      "confidence": 0.92
+    }
+  ]
+}
+

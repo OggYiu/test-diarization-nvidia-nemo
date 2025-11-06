@@ -1,0 +1,35 @@
+{
+  "conversation_number": 1,
+  "filename": "YOUR_FILENAME.wav",
+  "metadata": {
+    "filename": "YOUR_FILENAME.wav",
+    "broker_name": "Broker Name",
+    "broker_id": "0489",
+    "client_number": "12345678",
+    "client_name": "CLIENT NAME",
+    "client_id": "P77197",
+    "utc_datetime": "2025-10-20T02:01:20",
+    "hkt_datetime": "2025-10-20T10:01:20",
+    "timestamp": "2025-11-05 18:21:19"
+  },
+  "conversations": [
+    [
+      {
+        "speaker": "Broker",
+        "text": "喂，你好！"
+      },
+      {
+        "speaker": "Client",
+        "text": "我想買/沽股票..."
+      }
+    ]
+  ],
+  "transcriptions": [
+    {
+      "model": "wsyue-asr",
+      "text": "Full transcription text here...",
+      "confidence": 0.92
+    }
+  ]
+}
+

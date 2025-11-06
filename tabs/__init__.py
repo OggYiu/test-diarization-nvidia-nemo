@@ -8,7 +8,6 @@ from .tab_diarization import create_diarization_tab
 from .tab_stt import create_stt_tab
 from .tab_llm_analysis import create_llm_analysis_tab
 from .tab_speaker_separation import create_speaker_separation_tab
-from .tab_audio_enhancement import create_audio_enhancement_tab
 from .tab_llm_comparison import create_llm_comparison_tab
 from .tab_llm_chat import create_llm_chat_tab
 from .tab_multi_llm import create_multi_llm_tab
@@ -22,6 +21,7 @@ from .tab_trade_verification import create_trade_verification_tab
 from .tab_text_correction import create_text_correction_tab
 from .tab_json_batch_analysis import create_json_batch_analysis_tab
 from .tab_csv_stock_enrichment import create_csv_stock_enrichment_tab
+from .tab_conversation_record_analysis import create_conversation_record_analysis_tab
 
 __all__ = [
     'create_file_metadata_tab',
@@ -43,5 +43,6 @@ __all__ = [
     'create_text_correction_tab',
     'create_json_batch_analysis_tab',
     'create_csv_stock_enrichment_tab',
+    'create_conversation_record_analysis_tab',
 ]
 

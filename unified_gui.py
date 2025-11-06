@@ -15,6 +15,7 @@ Unified Gradio GUI combining all phone call analysis tools:
 13. Transaction Stock Search
 14. Trade Verification
 15. Text Correction
+16. Conversation Record Analysis
 
 Modular version - each tab is in a separate file in the tabs/ directory
 """
@@ -42,6 +43,7 @@ from tabs import (
     # create_text_correction_tab,
     # create_llm_chat_tab,
     create_csv_stock_enrichment_tab,
+    create_conversation_record_analysis_tab,
 )
 
 
@@ -75,6 +77,7 @@ def create_unified_interface():
             # create_transaction_stock_search_tab()
             create_trade_verification_tab()
             create_csv_stock_enrichment_tab()
+            create_conversation_record_analysis_tab()
             # create_text_correction_tab()
             # create_llm_chat_tab()
     
