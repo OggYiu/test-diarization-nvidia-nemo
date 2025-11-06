@@ -90,6 +90,21 @@ def create_merged_stocks_json(combined_results: List[Dict[str, Any]]) -> str:
             most_common_word = word_counts.most_common(1)[0][0]
             merged_stock["original_word"] = most_common_word
         
+        # Include quantity and price if present (use most common values)
+        quantities = [s.get("quantity", "") for s in stock_list if s.get("quantity")]
+        if quantities:
+            # Use the most common quantity
+            qty_counts = Counter(quantities)
+            most_common_qty = qty_counts.most_common(1)[0][0]
+            merged_stock["quantity"] = most_common_qty
+        
+        prices = [s.get("price", "") for s in stock_list if s.get("price")]
+        if prices:
+            # Use the most common price
+            price_counts = Counter(prices)
+            most_common_price = price_counts.most_common(1)[0][0]
+            merged_stock["price"] = most_common_price
+        
         # Include corrected stock information (always populate, use first available or original values)
         corrected_names = [s.get("corrected_stock_name") for s in stock_list if s.get("corrected_stock_name")]
         corrected_numbers = [s.get("corrected_stock_number") for s in stock_list if s.get("corrected_stock_number")]

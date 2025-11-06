@@ -34,12 +34,14 @@ from tabs import (
     # create_multi_llm_tab,
     # create_stt_stock_comparison_tab,
     # create_transcription_merger_tab,
-    create_transaction_analysis_tab,
+    # create_transaction_analysis_tab,
+    create_transaction_analysis_json_tab,
     # create_milvus_search_tab,
     # create_transaction_stock_search_tab,
     create_trade_verification_tab,
     # create_text_correction_tab,
     # create_llm_chat_tab,
+    create_csv_stock_enrichment_tab,
 )
 
 
@@ -67,10 +69,12 @@ def create_unified_interface():
             # create_multi_llm_tab()
             # create_stt_stock_comparison_tab()
             # create_transcription_merger_tab()
-            create_transaction_analysis_tab()
+            # create_transaction_analysis_tab()
+            create_transaction_analysis_json_tab()
             # create_milvus_search_tab()
             # create_transaction_stock_search_tab()
             create_trade_verification_tab()
+            create_csv_stock_enrichment_tab()
             # create_text_correction_tab()
             # create_llm_chat_tab()
     

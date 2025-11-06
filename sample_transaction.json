@@ -3,6 +3,8 @@
     {
       "transaction_type": "buy",
       "confidence_score": 2.0,
+      "conversation_number": 1,
+      "hkt_datetime": "2025-10-20T10:15:30",
       "stock_code": "18138",
       "stock_name": "騰訊認購證",
       "quantity": "20000",
@@ -12,6 +14,8 @@
     {
       "transaction_type": "queue",
       "confidence_score": 1.0,
+      "conversation_number": 1,
+      "hkt_datetime": "2025-10-20T10:15:30",
       "stock_code": "00020",
       "stock_name": "金碟科技",
       "quantity": "15",
@@ -21,6 +25,8 @@
     {
       "transaction_type": "queue",
       "confidence_score": 0.5,
+      "conversation_number": 1,
+      "hkt_datetime": "2025-10-20T10:15:30",
       "stock_code": "02411",
       "stock_name": "阿里健康",
       "quantity": "6",
