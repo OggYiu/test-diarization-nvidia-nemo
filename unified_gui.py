@@ -20,6 +20,7 @@ from tabs import (
     create_conversation_record_analysis_tab,
     create_compliance_analysis_tab,
     # create_csv_stock_enrichment_tab,
+    create_full_pipeline_tab,
 )
 
 
@@ -50,6 +51,9 @@ def create_unified_interface():
             # Pass shared state to tabs that support chaining
             # create_file_metadata_tab()
             # create_diarization_tab()
+            
+            # Full Pipeline Tab - Chains all steps automatically
+            create_full_pipeline_tab()
             
             # Chain 1: STT → JSON Batch Analysis
             create_stt_tab(output_json_state=shared_conversation_json)
