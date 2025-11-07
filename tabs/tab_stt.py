@@ -112,6 +112,13 @@ def apply_text_corrections(text_content: str, correction_json: str) -> tuple[str
         corrected_text = text_content
         corrections_applied = []
         
+        # Debug: Show original text
+        print("\n" + "="*80)
+        print("🔍 TEXT CORRECTION DEBUG")
+        print("="*80)
+        print(f"📝 ORIGINAL TEXT:\n{text_content}")
+        print("="*80)
+        
         # Handle both single correction object and array of corrections
         if isinstance(correction_data, dict):
             correction_list = [correction_data]
@@ -148,18 +155,27 @@ def apply_text_corrections(text_content: str, correction_json: str) -> tuple[str
                     import re
                     pattern = re.escape(wrong_word)
                     
+                    # Create a closure with the current text to avoid stale references
+                    current_text = corrected_text
+                    
+                    # Debug: Track replacement decisions
+                    debug_skipped = []
+                    debug_replaced = []
+                    replacement_count = [0]  # Use list to allow modification in nested function
+                    
                     def replace_func(match):
                         # Check if this match is inside brackets by looking at the context
                         start_pos = match.start()
                         end_pos = match.end()
                         
                         # Count opening and closing brackets before this position
-                        text_before = corrected_text[:start_pos]
+                        text_before = current_text[:start_pos]
                         open_count = text_before.count('(')
                         close_count = text_before.count(')')
                         
                         # If we're inside brackets, don't replace
                         if open_count > close_count:
+                            debug_skipped.append(f"  ⏭️  Skipped '{match.group(0)}' at pos {start_pos} (inside brackets)")
                             return match.group(0)  # Return original text
                         
                         # Check if this match is already part of the correct word/phrase
@@ -171,31 +187,56 @@ def apply_text_corrections(text_content: str, correction_json: str) -> tuple[str
                         for offset in range(correct_word_len - wrong_word_len + 1):
                             # Check if correct_word contains wrong_word at this offset
                             if correct_word[offset:offset + wrong_word_len] == wrong_word:
-                                # Extract the corresponding context from corrected_text
+                                # Extract the corresponding context from current_text
                                 context_start = start_pos - offset
                                 context_end = context_start + correct_word_len
                                 
                                 # Make sure we're within bounds
-                                if context_start >= 0 and context_end <= len(corrected_text):
-                                    context = corrected_text[context_start:context_end]
+                                if context_start >= 0 and context_end <= len(current_text):
+                                    context = current_text[context_start:context_end]
                                     # If the context matches the correct word, skip replacement
                                     if context == correct_word:
+                                        debug_skipped.append(f"  ⏭️  Skipped '{match.group(0)}' at pos {start_pos} (already part of '{correct_word}')")
                                         return match.group(0)  # Return original text
                         
                         # Otherwise, apply the correction
-                        return f"{match.group(0)}({correct_word})"
+                        replacement = f"{match.group(0)}({correct_word})"
+                        debug_replaced.append(f"  ✅ Replaced '{match.group(0)}' → '{replacement}' at pos {start_pos}")
+                        replacement_count[0] += 1  # Track actual replacements
+                        return replacement
+                    
+                    # Debug: Show text before this replacement
+                    print(f"\n🔄 Processing: '{wrong_word}' → '{correct_word}'")
+                    print(f"   Text before: {current_text[:100]}..." if len(current_text) > 100 else f"   Text before: {current_text}")
                     
                     # Apply replacement
-                    new_text = re.sub(pattern, replace_func, corrected_text)
-                    count = corrected_text.count(wrong_word) - new_text.count(wrong_word)
+                    new_text = re.sub(pattern, replace_func, current_text)
+                    count = replacement_count[0]  # Use actual replacement count
+                    
+                    # Debug: Show what happened
+                    if debug_replaced:
+                        for msg in debug_replaced:
+                            print(msg)
+                    if debug_skipped:
+                        for msg in debug_skipped:
+                            print(msg)
                     
                     if count > 0:
                         corrected_text = new_text
                         corrections_applied.append(f"'{wrong_word}' → '{wrong_word}({correct_word})' ({count}x)")
+                        print(f"   Text after:  {corrected_text[:100]}..." if len(corrected_text) > 100 else f"   Text after:  {corrected_text}")
+                    else:
+                        print(f"   ⚠️  No changes made (all occurrences were skipped)")
         
         # Return corrected text with success
+        print("\n" + "="*80)
         if corrections_applied:
             print(f"✅ Text corrections applied: {', '.join(corrections_applied)}")
+        else:
+            print("ℹ️  No corrections were applied")
+        print("="*80)
+        print(f"📝 FINAL CORRECTED TEXT:\n{corrected_text}")
+        print("="*80 + "\n")
         
         return corrected_text, ""
         

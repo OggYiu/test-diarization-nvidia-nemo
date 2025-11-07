@@ -1,2 +1,2 @@
 ﻿client_id,broker_id,hkt_datetime,analysis_timestamp,overall_confidence,compliance_status,human_review_needed,total_transactions,total_records,high_confidence_matches,medium_confidence_matches,low_confidence_matches,unmatched_transactions,unmatched_records,risk_factors,review_reasons,model_used
-P77197,0489,2025-10-20T10:01:20,2025-11-07 14:08:26,0.967,high,Yes,1,2,3,0,0,0,0,Mismatch between conversation and records count,Discrepancy: 1 transactions vs 2 records,qwen3:32b
+P77197,0489,2025-10-20T10:01:20,2025-11-07 15:16:55,0.954,high,No,2,2,4,0,0,0,0,,,qwen3:32b
