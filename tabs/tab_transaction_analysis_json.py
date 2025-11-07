@@ -10,7 +10,6 @@ import gradio as gr
 
 from pydantic import BaseModel, Field
 from langchain_ollama import ChatOllama
-from opencc import OpenCC
 
 # Import centralized model configuration
 from model_config import MODEL_OPTIONS, DEFAULT_MODEL, DEFAULT_OLLAMA_URL
@@ -22,32 +21,8 @@ from tabs.tab_stt_stock_comparison import (
     LLM_OPTIONS,
 )
 
-
-# ============================================================================
-# OpenCC Translation Setup
-# ============================================================================
-
-# Initialize OpenCC converter (Simplified to Traditional Chinese)
-opencc_converter = OpenCC('s2t')  # s2t = Simplified to Traditional
-
-def translate_to_traditional_chinese(text: str) -> str:
-    """
-    Convert Simplified Chinese text to Traditional Chinese using OpenCC.
-    
-    Args:
-        text: Input text (may contain Simplified Chinese)
-        
-    Returns:
-        str: Text with Simplified Chinese converted to Traditional Chinese
-    """
-    if not text or not text.strip():
-        return text
-    
-    try:
-        return opencc_converter.convert(text)
-    except Exception as e:
-        print(f"OpenCC translation failed: {e}")
-        return text  # Return original text if translation fails
+# Import OpenCC translation utility
+from opencc_utils import translate_to_traditional_chinese
 
 
 # ============================================================================
@@ -836,8 +811,15 @@ def analyze_transactions_with_json(
         return (error_msg, "")
 
 
-def create_transaction_analysis_json_tab():
-    """Create and return the Transaction Analysis with JSON tab"""
+def create_transaction_analysis_json_tab(input_conversation_state=None, input_stocks_state=None, output_transaction_state=None):
+    """
+    Create and return the Transaction Analysis with JSON tab
+    
+    Args:
+        input_conversation_state: Optional gr.State for conversation JSON from previous tab
+        input_stocks_state: Optional gr.State for merged stocks JSON from previous tab
+        output_transaction_state: Optional gr.State to output transaction JSON for next tab
+    """
     with gr.Tab("📊 Transaction Analysis (JSON)"):
         with gr.Row():
             with gr.Column(scale=1):
@@ -865,6 +847,14 @@ def create_transaction_analysis_json_tab():
                     show_copy_button=True,
                     info="貼上對話JSON，系統會自動提取股票信息和日期時間"
                 )
+                
+                # Add load button if conversation state is provided
+                if input_conversation_state is not None:
+                    load_conversation_btn = gr.Button(
+                        "📥 Load Conversation from Previous Tab",
+                        variant="secondary",
+                        size="sm"
+                    )
                 
                 with gr.Row():
                     conv_llm_checkboxes = gr.CheckboxGroup(
@@ -920,6 +910,14 @@ def create_transaction_analysis_json_tab():
                     lines=10,
                     info="從 JSON Batch Analysis 的 Merged JSON Output 複製，或從上面的提取結果自動填充",
                 )
+                
+                # Add load button if stocks state is provided
+                if input_stocks_state is not None:
+                    load_stocks_btn = gr.Button(
+                        "📥 Load Stocks from Previous Tab",
+                        variant="secondary",
+                        size="sm"
+                    )
                 
                 gr.Markdown("#### LLM 設定")
                 
@@ -993,8 +991,30 @@ def create_transaction_analysis_json_tab():
         )
         
         # Connect the analyze button
+        # Create wrapper if output state is needed for chaining
+        if output_transaction_state is not None:
+            def analyze_with_transaction_state(*args):
+                """Wrapper that outputs transaction JSON to state"""
+                result = analyze_transactions_with_json(*args)
+                # result is (summary_result, json_result)
+                # Return both + json_result again for state
+                return result + (result[1],)  # result[1] is json_result
+            
+            analyze_fn = analyze_with_transaction_state
+            outputs_list = [
+                summary_result_box,
+                json_result_box,
+                output_transaction_state  # state for chaining
+            ]
+        else:
+            analyze_fn = analyze_transactions_with_json
+            outputs_list = [
+                summary_result_box,
+                json_result_box,
+            ]
+        
         analyze_btn.click(
-            fn=analyze_transactions_with_json,
+            fn=analyze_fn,
             inputs=[
                 conversation_json_box,
                 merged_json_box,
@@ -1003,9 +1023,33 @@ def create_transaction_analysis_json_tab():
                 system_message_box,
                 temperature_slider,
             ],
-            outputs=[
-                summary_result_box,
-                json_result_box,
-            ],
+            outputs=outputs_list,
         )
+        
+        # Connect load buttons if states are provided
+        if input_conversation_state is not None:
+            def load_conversation_from_state(conv_json):
+                """Load conversation JSON from shared state"""
+                if conv_json:
+                    return conv_json
+                return "⚠️ No conversation data from previous tab. Please run STT tab first."
+            
+            load_conversation_btn.click(
+                fn=load_conversation_from_state,
+                inputs=[input_conversation_state],
+                outputs=[conversation_json_box]
+            )
+        
+        if input_stocks_state is not None:
+            def load_stocks_from_state(stocks_json):
+                """Load stocks JSON from shared state"""
+                if stocks_json:
+                    return stocks_json
+                return "⚠️ No stocks data from previous tab. Please run JSON Batch Analysis tab first."
+            
+            load_stocks_btn.click(
+                fn=load_stocks_from_state,
+                inputs=[input_stocks_state],
+                outputs=[merged_json_box]
+            )
 

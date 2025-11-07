@@ -318,7 +318,7 @@ def verify_stocks_in_conversations(
     """
     verification_results = []
     
-    # Build a comprehensive conversation text
+    # Build a comprehensive conversation text (include ALL transcription sources)
     all_conversation_texts = []
     for conv in conversations:
         transcriptions = conv.get("transcriptions", {})
@@ -326,7 +326,7 @@ def verify_stocks_in_conversations(
             for source_name, text in transcriptions.items():
                 if text and text.strip():
                     all_conversation_texts.append(f"[{source_name}]: {text}")
-                    break
+                    # Don't break - include all transcription sources!
         elif isinstance(transcriptions, str) and transcriptions.strip():
             all_conversation_texts.append(transcriptions)
     
@@ -520,22 +520,24 @@ def process_json_batch(
                 metadata = conversation.get("metadata", {})
                 transcriptions = conversation.get("transcriptions", {})
                 
-                # Get the transcription text (use the first available transcription)
-                transcription_text = None
-                transcription_source = None
+                # Get ALL available transcription texts (analyze each source separately)
+                transcription_sources = []
                 
-                # Try to get transcription from different sources
+                # Collect all available transcriptions from different sources
                 if isinstance(transcriptions, dict):
                     for source_name, text in transcriptions.items():
                         if text and text.strip():
-                            transcription_text = text
-                            transcription_source = source_name
-                            break
-                elif isinstance(transcriptions, str):
-                    transcription_text = transcriptions
-                    transcription_source = "default"
+                            transcription_sources.append({
+                                "source_name": source_name,
+                                "text": text
+                            })
+                elif isinstance(transcriptions, str) and transcriptions.strip():
+                    transcription_sources.append({
+                        "source_name": "default",
+                        "text": transcriptions
+                    })
                 
-                if not transcription_text or not transcription_text.strip():
+                if not transcription_sources:
                     warning_msg = f"⚠️ Skipping Conversation #{conv_number} - No transcription text found"
                     output_parts.append(warning_msg)
                     output_parts.append("")
@@ -547,102 +549,117 @@ def process_json_batch(
                 output_parts.append(f"📞 CONVERSATION #{conv_number} / {total_conversations}")
                 output_parts.append("=" * 100)
                 output_parts.append(f"📁 Filename: {filename}")
-                output_parts.append(f"🎤 Transcription Source: {transcription_source}")
+                output_parts.append(f"🎤 Available Transcription Sources: {len(transcription_sources)} ({', '.join([src['source_name'] for src in transcription_sources])})")
                 
                 # Display metadata if available
                 if metadata:
                     output_parts.append(f"👤 Broker: {metadata.get('broker_name', 'N/A')} (ID: {metadata.get('broker_id', 'N/A')})")
                     output_parts.append(f"👥 Client: {metadata.get('client_name', 'N/A')} (ID: {metadata.get('client_id', 'N/A')})")
                     output_parts.append(f"📅 HKT DateTime: {metadata.get('hkt_datetime', 'N/A')}")
+                output_parts.append("")
                 
-                # Build contextual information from previous conversations
-                contextual_system_message = system_message
-                if use_contextual_analysis and previous_contexts:
-                    output_parts.append(f"🔗 Using context from {len(previous_contexts)} previous conversation(s)")
-                    output_parts.append("")
-                    
-                    context_summary = "\n\n**===== CONTEXT FROM PREVIOUS CONVERSATIONS =====**\n"
-                    context_summary += "The following are summaries of previous conversations in this session. "
-                    context_summary += "Use this information to understand references and context in the current conversation.\n\n"
-                    
-                    for prev_ctx in previous_contexts:
-                        context_summary += f"--- Previous Conversation #{prev_ctx['conversation_number']} ---\n"
-                        context_summary += f"Summary: {prev_ctx['summary']}\n"
-                        if prev_ctx['stocks']:
-                            context_summary += "Stocks discussed:\n"
-                            for stock in prev_ctx['stocks']:
-                                stock_name = stock.get('corrected_stock_name') or stock.get('stock_name', 'N/A')
-                                stock_number = stock.get('corrected_stock_number') or stock.get('stock_number', 'N/A')
-                                context_summary += f"  - {stock_name} ({stock_number})\n"
-                        context_summary += "\n"
-                    
-                    context_summary += "**===== END OF PREVIOUS CONTEXT =====**\n"
-                    context_summary += "\nNow analyze the CURRENT conversation below. When you see abbreviated references "
-                    context_summary += "(like '窩輪' without a specific stock name), check if they might be referring to "
-                    context_summary += "stocks mentioned in the previous conversations above.\n"
-                    
-                    # Append context to system message
-                    contextual_system_message = system_message + "\n\n" + context_summary
-                
-                # Store results for this conversation
+                # Store results for this conversation (across all transcription sources)
                 conv_stocks = []
                 conv_summary = ""
                 
-                # Process with each LLM
-                for llm_idx, model in enumerate(selected_llms, 1):
-                    msg = f"[Conversation {conv_number}/{total_conversations}] [LLM {llm_idx}/{total_llms}] Starting analysis with: {model}"
-                    logging.info(msg)
-                    print(msg)
+                # Process each transcription source
+                for trans_idx, transcription_source_data in enumerate(transcription_sources, 1):
+                    transcription_source = transcription_source_data["source_name"]
+                    transcription_text = transcription_source_data["text"]
                     
-                    output_parts.append(f"🤖 Analyzing with LLM {llm_idx}/{total_llms}: {model}")
+                    output_parts.append("─" * 100)
+                    output_parts.append(f"📝 TRANSCRIPTION SOURCE {trans_idx}/{len(transcription_sources)}: {transcription_source}")
+                    output_parts.append("─" * 100)
                     output_parts.append("")
                     
-                    start_time = time.time()
+                    # Build contextual information from previous conversations
+                    contextual_system_message = system_message
+                    if use_contextual_analysis and previous_contexts:
+                        output_parts.append(f"🔗 Using context from {len(previous_contexts)} previous conversation(s)")
+                        output_parts.append("")
+                        
+                        context_summary_text = "\n\n**===== CONTEXT FROM PREVIOUS CONVERSATIONS =====**\n"
+                        context_summary_text += "The following are summaries of previous conversations in this session. "
+                        context_summary_text += "Use this information to understand references and context in the current conversation.\n\n"
+                        
+                        for prev_ctx in previous_contexts:
+                            context_summary_text += f"--- Previous Conversation #{prev_ctx['conversation_number']} ---\n"
+                            context_summary_text += f"Summary: {prev_ctx['summary']}\n"
+                            if prev_ctx['stocks']:
+                                context_summary_text += "Stocks discussed:\n"
+                                for stock in prev_ctx['stocks']:
+                                    stock_name = stock.get('corrected_stock_name') or stock.get('stock_name', 'N/A')
+                                    stock_number = stock.get('corrected_stock_number') or stock.get('stock_number', 'N/A')
+                                    context_summary_text += f"  - {stock_name} ({stock_number})\n"
+                            context_summary_text += "\n"
+                        
+                        context_summary_text += "**===== END OF PREVIOUS CONTEXT =====**\n"
+                        context_summary_text += "\nNow analyze the CURRENT conversation below. When you see abbreviated references "
+                        context_summary_text += "(like '窩輪' without a specific stock name), check if they might be referring to "
+                        context_summary_text += "stocks mentioned in the previous conversations above.\n"
+                        
+                        # Append context to system message
+                        contextual_system_message = system_message + "\n\n" + context_summary_text
                     
-                    # Extract stocks (using contextual system message if available)
-                    result_model, formatted_result, raw_json = extract_stocks_with_single_llm(
-                        model=model,
-                        conversation_text=transcription_text,
-                        system_message=contextual_system_message,
-                        ollama_url=ollama_url,
-                        temperature=temperature,
-                        stt_source=transcription_source,
-                        use_vector_correction=use_vector_correction
-                    )
+                    # Process with each LLM for this transcription source
+                    for llm_idx, model in enumerate(selected_llms, 1):
+                        msg = f"[Conversation {conv_number}/{total_conversations}] [Source: {transcription_source}] [LLM {llm_idx}/{total_llms}] Starting analysis with: {model}"
+                        logging.info(msg)
+                        print(msg)
+                        
+                        output_parts.append(f"🤖 Analyzing with LLM {llm_idx}/{total_llms}: {model}")
+                        output_parts.append("")
+                        
+                        start_time = time.time()
+                        
+                        # Extract stocks (using contextual system message if available)
+                        result_model, formatted_result, raw_json = extract_stocks_with_single_llm(
+                            model=model,
+                            conversation_text=transcription_text,
+                            system_message=contextual_system_message,
+                            ollama_url=ollama_url,
+                            temperature=temperature,
+                            stt_source=transcription_source,
+                            use_vector_correction=use_vector_correction
+                        )
+                        
+                        elapsed_time = time.time() - start_time
+                        msg = f"[Conversation {conv_number}/{total_conversations}] [Source: {transcription_source}] [LLM {llm_idx}/{total_llms}] Completed: {model} - Time: {elapsed_time:.2f}s"
+                        logging.info(msg)
+                        print(msg)
+                        
+                        # Display results
+                        output_parts.append("┌─ RESULTS")
+                        for line in formatted_result.split("\n"):
+                            output_parts.append(f"│  {line}")
+                        output_parts.append("└" + "─" * 99)
+                        output_parts.append("")
+                        
+                        # Parse and store stocks for combined output
+                        if raw_json and raw_json.strip():
+                            try:
+                                parsed = json.loads(raw_json)
+                                stocks = parsed.get("stocks", [])
+                                for stock in stocks:
+                                    stock["llm_model"] = model
+                                    stock["transcription_source"] = transcription_source  # Track which transcription source found this stock
+                                conv_stocks.extend(stocks)
+                                
+                                # Capture summary for contextual analysis (prefer first LLM's summary)
+                                if not conv_summary and "summary" in parsed:
+                                    conv_summary = parsed["summary"]
+                            except json.JSONDecodeError:
+                                pass
                     
-                    elapsed_time = time.time() - start_time
-                    msg = f"[Conversation {conv_number}/{total_conversations}] [LLM {llm_idx}/{total_llms}] Completed: {model} - Time: {elapsed_time:.2f}s"
-                    logging.info(msg)
-                    print(msg)
-                    
-                    # Display results
-                    output_parts.append("┌─ RESULTS")
-                    for line in formatted_result.split("\n"):
-                        output_parts.append(f"│  {line}")
-                    output_parts.append("└" + "─" * 99)
+                    output_parts.append(f"✅ Completed analysis for transcription source: {transcription_source}")
                     output_parts.append("")
-                    
-                    # Parse and store stocks for combined output
-                    if raw_json and raw_json.strip():
-                        try:
-                            parsed = json.loads(raw_json)
-                            stocks = parsed.get("stocks", [])
-                            for stock in stocks:
-                                stock["llm_model"] = model
-                            conv_stocks.extend(stocks)
-                            
-                            # Capture summary for contextual analysis (prefer first LLM's summary)
-                            if not conv_summary and "summary" in parsed:
-                                conv_summary = parsed["summary"]
-                        except json.JSONDecodeError:
-                            pass
                 
                 # Create combined result for this conversation
                 conversation_result = {
                     "conversation_number": conv_number,
                     "filename": filename,
                     "metadata": metadata,
-                    "transcription_source": transcription_source,
+                    "transcription_sources": [src["source_name"] for src in transcription_sources],  # Track all sources
                     "analysis_timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     "llms_used": selected_llms,
                     "stocks": conv_stocks
@@ -888,8 +905,14 @@ def process_json_batch(
 # Gradio Tab Creation
 # ============================================================================
 
-def create_json_batch_analysis_tab():
-    """Create and return the JSON Batch Analysis tab"""
+def create_json_batch_analysis_tab(input_json_state=None, output_stocks_state=None):
+    """
+    Create and return the JSON Batch Analysis tab
+    
+    Args:
+        input_json_state: Optional gr.State component to load JSON data from previous tabs
+        output_stocks_state: Optional gr.State component to output merged stocks JSON for next tabs
+    """
     with gr.Tab("🔟 JSON Batch Analysis"):
         with gr.Row():
             with gr.Column(scale=1):
@@ -914,6 +937,14 @@ def create_json_batch_analysis_tab():
                     lines=20,
                     show_copy_button=True,
                 )
+                
+                # Add button to load from previous tab if state is provided
+                if input_json_state is not None:
+                    load_from_stt_btn = gr.Button(
+                        "📥 Load from STT Tab",
+                        variant="secondary",
+                        size="sm"
+                    )
                 
                 gr.Markdown("#### 🤖 Select LLMs for Analysis")
                 
@@ -1023,8 +1054,34 @@ def create_json_batch_analysis_tab():
                 )
         
         # Connect the analyze button
+        # Create wrapper if output state is needed for chaining
+        if output_stocks_state is not None:
+            def process_with_stock_state(*args):
+                """Wrapper that outputs merged stocks to state"""
+                result = process_json_batch(*args)
+                # result is (formatted_results, combined_json, merged_json, verification_results)
+                # Return all 4 + merged_json again for state
+                return result + (result[2],)  # result[2] is merged_json
+            
+            analyze_fn = process_with_stock_state
+            outputs_list = [
+                results_box,
+                combined_json_box,
+                merged_json_box,
+                verification_results_box,
+                output_stocks_state  # state for chaining
+            ]
+        else:
+            analyze_fn = process_json_batch
+            outputs_list = [
+                results_box,
+                combined_json_box,
+                merged_json_box,
+                verification_results_box
+            ]
+        
         analyze_btn.click(
-            fn=process_json_batch,
+            fn=analyze_fn,
             inputs=[
                 json_input_box,
                 llm_checkboxes,
@@ -1036,6 +1093,20 @@ def create_json_batch_analysis_tab():
                 enable_stock_verification_checkbox,
                 verification_llm_dropdown,
             ],
-            outputs=[results_box, combined_json_box, merged_json_box, verification_results_box],
+            outputs=outputs_list,
         )
+        
+        # Connect the load from STT button if state is provided
+        if input_json_state is not None:
+            def load_from_state(json_data):
+                """Load JSON data from shared state"""
+                if json_data:
+                    return json_data
+                return "⚠️ No data from STT tab. Please run the STT tab first."
+            
+            load_from_stt_btn.click(
+                fn=load_from_state,
+                inputs=[input_json_state],
+                outputs=[json_input_box]
+            )
 

@@ -33,24 +33,53 @@ def create_unified_interface():
             """
         )
         
+        # ====================================================================
+        # SHARED STATE COMPONENTS - Data Pipeline
+        # ====================================================================
+        # These hidden state components pass data between tabs for chaining
+        # Complete chain: STT → JSON Batch Analysis → Transaction Analysis JSON → Trade Verification
+        shared_conversation_json = gr.State(None)  # Conversation JSON from STT
+        shared_merged_stocks_json = gr.State(None)  # Merged stocks from JSON Batch Analysis
+        shared_transaction_json = gr.State(None)  # Transaction analysis results
+        
         with gr.Tabs():
             # Create all tabs by calling their respective functions
+            # Pass shared state to tabs that support chaining
             # create_file_metadata_tab()
             # create_diarization_tab()
-            create_stt_tab()
+            
+            # Chain 1: STT → JSON Batch Analysis
+            create_stt_tab(output_json_state=shared_conversation_json)
+            
             # create_llm_analysis_tab()
             # create_speaker_separation_tab()
             # create_audio_enhancement_tab()
             # create_llm_comparison_tab()
-            create_json_batch_analysis_tab()
+            
+            # Chain 2: JSON Batch Analysis → Transaction Analysis JSON
+            create_json_batch_analysis_tab(
+                input_json_state=shared_conversation_json,
+                output_stocks_state=shared_merged_stocks_json
+            )
+            
             # create_multi_llm_tab()
             # create_stt_stock_comparison_tab()
             # create_transcription_merger_tab()
             # create_transaction_analysis_tab()
-            create_transaction_analysis_json_tab()
+            
+            # Chain 3: Transaction Analysis JSON → Trade Verification
+            create_transaction_analysis_json_tab(
+                input_conversation_state=shared_conversation_json,
+                input_stocks_state=shared_merged_stocks_json,
+                output_transaction_state=shared_transaction_json
+            )
+            
             # create_milvus_search_tab()
             # create_transaction_stock_search_tab()
-            create_trade_verification_tab()
+            
+            # Chain 4: Trade Verification (final step)
+            create_trade_verification_tab(input_transaction_state=shared_transaction_json)
+            
             create_conversation_record_analysis_tab()
             create_csv_stock_enrichment_tab()
             # create_text_correction_tab()

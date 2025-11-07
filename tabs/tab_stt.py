@@ -523,8 +523,13 @@ def process_file_metadata(audio_file):
         }, indent=2, ensure_ascii=False)
 
 
-def initialize_sensevoice_model():
-    """Initialize the SenseVoice model."""
+def initialize_sensevoice_model(vad_model="fsmn-vad", max_single_segment_time=30000):
+    """Initialize the SenseVoice model.
+    
+    Args:
+        vad_model: VAD model to use (default: "fsmn-vad")
+        max_single_segment_time: Maximum segment time in milliseconds (default: 30000)
+    """
     global sensevoice_model, current_sensevoice_loaded
     
     # Only reload if not already loaded
@@ -533,17 +538,26 @@ def initialize_sensevoice_model():
     
     status = f"🔄 Loading SenseVoiceSmall model...\n"
     status += f"  ⚙️ Device: {DEVICE_INFO}\n"
+    status += f"  ⚙️ VAD Model: {vad_model}\n"
+    status += f"  ⚙️ Max Segment Time: {max_single_segment_time}ms\n"
     
     try:
+        # Determine device for FunASR (use 'cuda' or 'cpu')
+        device_str = 'cuda' if torch.cuda.is_available() else 'cpu'
+        print(f"Using device: {device_str}")
+        print(f"Using VAD model: {vad_model}")
+        print(f"Using max segment time: {max_single_segment_time}ms")
         sensevoice_model = AutoModel(
             model="iic/SenseVoiceSmall",
-            vad_model="iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
-            vad_kwargs={"max_single_segment_time": 30000},
+            vad_model=vad_model,
+            vad_kwargs={"max_single_segment_time": max_single_segment_time},
             trust_remote_code=False,
             disable_update=True,
+            ban_emo_unk=True,
+            device=device_str
         )
         current_sensevoice_loaded = True
-        status += f"✅ SenseVoiceSmall loaded successfully! (FunASR handles device internally)"
+        status += f"✅ SenseVoiceSmall loaded successfully on {DEVICE_NAME}!"
         return status
     except Exception as e:
         status += f"❌ Failed to load SenseVoiceSmall: {str(e)}"
@@ -928,7 +942,7 @@ def identify_speakers_with_llm(conversation_text: str, broker_name: str, client_
         return conversation_text, error_msg, "speaker_0"
 
 
-def process_chop_and_transcribe(audio_file, language, use_sensevoice, use_whisperv3_cantonese, overwrite_diarization=False, padding_ms=100, use_enhanced_format=False, progress=gr.Progress()):
+def process_chop_and_transcribe(audio_file, language, use_sensevoice, use_whisperv3_cantonese, overwrite_diarization=False, padding_ms=100, use_enhanced_format=False, vad_model="fsmn-vad", max_single_segment_time=30000, progress=gr.Progress()):
     """
     Integrated pipeline: Extract metadata, auto-diarize (with cache), chop audio based on RTTM, 
     transcribe the segments, and use LLM to identify speakers.
@@ -941,6 +955,8 @@ def process_chop_and_transcribe(audio_file, language, use_sensevoice, use_whispe
         overwrite_diarization: If True, reprocess diarization even if cached
         padding_ms: Padding in milliseconds for chopping (default: 100)
         use_enhanced_format: If True, add metadata header and timestamps to results
+        vad_model: VAD model to use (default: "fsmn-vad")
+        max_single_segment_time: Maximum segment time in milliseconds (default: 30000)
     
     Returns:
         tuple: (metadata_json, json_file, sensevoice_txt, whisperv3_txt, zip_file, 
@@ -1108,7 +1124,7 @@ def process_chop_and_transcribe(audio_file, language, use_sensevoice, use_whispe
         # Step 5: Initialize models
         progress(0.25, desc="Loading models...")
         if use_sensevoice:
-            sensevoice_status = initialize_sensevoice_model()
+            sensevoice_status = initialize_sensevoice_model(vad_model, max_single_segment_time)
             status += sensevoice_status + "\n"
         if use_whisperv3_cantonese:
             whisperv3_status = initialize_whisperv3_cantonese_model()
@@ -1360,7 +1376,7 @@ client_id: {metadata_result['data']['client_id']}
         return "", None, None, None, None, "", "", "", error_msg
 
 
-def process_batch_transcription(audio_files, zip_file, link_or_path, language, use_sensevoice, use_whisperv3_cantonese, progress=gr.Progress()):
+def process_batch_transcription(audio_files, zip_file, link_or_path, language, use_sensevoice, use_whisperv3_cantonese, vad_model="fsmn-vad", max_single_segment_time=30000, progress=gr.Progress()):
     """
     Process multiple audio files for transcription.
     
@@ -1371,6 +1387,8 @@ def process_batch_transcription(audio_files, zip_file, link_or_path, language, u
         language: Language code for transcription
         use_sensevoice: Whether to use SenseVoiceSmall model
         use_whisperv3_cantonese: Whether to use Whisper-v3-Cantonese model
+        vad_model: VAD model to use (default: "fsmn-vad")
+        max_single_segment_time: Maximum segment time in milliseconds (default: 30000)
     
     Returns:
         tuple: (json_file, sensevoice_txt_file, whisperv3_txt_file, zip_file, sensevoice_conversation, whisperv3_conversation)
@@ -1392,7 +1410,7 @@ def process_batch_transcription(audio_files, zip_file, link_or_path, language, u
         # Initialize models based on checkboxes
         progress(0, desc="Loading models...")
         if use_sensevoice:
-            sensevoice_status = initialize_sensevoice_model()
+            sensevoice_status = initialize_sensevoice_model(vad_model, max_single_segment_time)
             status += sensevoice_status + "\n"
         if use_whisperv3_cantonese:
             whisperv3_status = initialize_whisperv3_cantonese_model()
@@ -1697,7 +1715,7 @@ def extract_timestamp_from_filename(filepath):
         return None
 
 
-def process_folder_batch(audio_input, language, use_sensevoice, use_whisperv3_cantonese, overwrite_diarization=False, padding_ms=100, use_enhanced_format=True, apply_corrections=False, correction_json="", progress=gr.Progress()):
+def process_folder_batch(audio_input, language, use_sensevoice, use_whisperv3_cantonese, overwrite_diarization=False, padding_ms=100, use_enhanced_format=True, apply_corrections=False, correction_json="", vad_model="fsmn-vad", max_single_segment_time=30000, progress=gr.Progress()):
     """
     Process either a single audio file, multiple audio files, or a folder containing audio files.
     
@@ -1711,6 +1729,8 @@ def process_folder_batch(audio_input, language, use_sensevoice, use_whisperv3_ca
         use_enhanced_format: If True, add metadata header and timestamps to results
         apply_corrections: If True, apply text corrections from correction_json
         correction_json: JSON string with correction rules
+        vad_model: VAD model to use (default: "fsmn-vad")
+        max_single_segment_time: Maximum segment time in milliseconds (default: 30000)
         
     Returns:
         tuple: (metadata_json, json_file, sensevoice_txt, whisperv3_txt, zip_file, 
@@ -1805,7 +1825,7 @@ def process_folder_batch(audio_input, language, use_sensevoice, use_whisperv3_ca
             # Process this single audio file
             result = process_chop_and_transcribe(
                 audio_file, language, use_sensevoice, use_whisperv3_cantonese, 
-                overwrite_diarization, padding_ms, use_enhanced_format, progress
+                overwrite_diarization, padding_ms, use_enhanced_format, vad_model, max_single_segment_time, progress
             )
             
             metadata_json, json_file, sensevoice_txt, whisperv3_txt, zip_file, sensevoice_labeled, whisperv3_labeled, llm_log, status_message = result
@@ -2014,7 +2034,7 @@ def process_folder_batch(audio_input, language, use_sensevoice, use_whisperv3_ca
         return "", None, None, None, None, error_msg, error_msg, error_msg, ""
 
 
-def process_audio_or_folder(audio_input, language, use_sensevoice, use_whisperv3_cantonese, overwrite_diarization, padding_ms, use_enhanced_format, apply_corrections, correction_json, progress=gr.Progress()):
+def process_audio_or_folder(audio_input, language, use_sensevoice, use_whisperv3_cantonese, overwrite_diarization, padding_ms, use_enhanced_format, apply_corrections, correction_json, vad_model, max_single_segment_time, progress=gr.Progress()):
     """
     Wrapper function that handles both file upload and folder path inputs.
     
@@ -2034,12 +2054,17 @@ def process_audio_or_folder(audio_input, language, use_sensevoice, use_whisperv3
     
     return process_folder_batch(
         final_input, language, use_sensevoice, use_whisperv3_cantonese, 
-        overwrite_diarization, padding_ms, use_enhanced_format, apply_corrections, correction_json, progress
+        overwrite_diarization, padding_ms, use_enhanced_format, apply_corrections, correction_json, vad_model, max_single_segment_time, progress
     )
 
 
-def create_stt_tab():
-    """Create and return the Batch Speech-to-Text tab (with integrated chopping)"""
+def create_stt_tab(output_json_state=None):
+    """
+    Create and return the Batch Speech-to-Text tab (with integrated chopping)
+    
+    Args:
+        output_json_state: Optional gr.State component to output JSON data for chaining with other tabs
+    """
     with gr.Tab("3️⃣ Auto-Diarize & Transcribe"):
         with gr.Row():
             with gr.Column(scale=1):
@@ -2122,7 +2147,7 @@ def create_stt_tab():
     "correct_word": "巴巴"
   },
   {
-    "wrong_words": ["巴巴"],
+    "wrong_words": ["巴巴", "爸爸", "爸巴", "巴爸"],
     "correct_word": "阿里巴巴"
   },
   {
@@ -2155,6 +2180,19 @@ def create_stt_tab():
                     value="yue",
                     label="Language (for SenseVoice)",
                     info="Select the language of the audio"
+                )
+                
+                gr.Markdown("#### Advanced Settings (SenseVoice)")
+                stt_vad_model = gr.Textbox(
+                    label="VAD Model",
+                    value="fsmn-vad",
+                    info="Voice Activity Detection model to use"
+                )
+                
+                stt_max_segment_time = gr.Number(
+                    label="Max Segment Time (ms)",
+                    value=30000,
+                    info="Maximum single segment time in milliseconds"
                 )
                 
                 stt_process_btn = gr.Button("🎯 Auto-Diarize & Transcribe", variant="primary", size="lg")
@@ -2220,20 +2258,31 @@ def create_stt_tab():
         )
         
         # Wire up the main transcription button
-        stt_process_btn.click(
-            fn=process_audio_or_folder,
-            inputs=[
-                stt_audio_input, 
-                stt_language_dropdown, 
-                stt_use_sensevoice, 
-                stt_use_whisperv3_cantonese, 
-                stt_overwrite_diarization, 
-                gr.Number(value=100, visible=False), 
-                stt_use_enhanced_format,
-                stt_apply_corrections,
-                stt_correction_json
-            ],
-            outputs=[
+        # Create wrapper function if state output is needed
+        if output_json_state is not None:
+            # Wrapper that duplicates JSON output for both display and state
+            def process_with_state(*args):
+                result = process_audio_or_folder(*args)
+                # result is a tuple of 8 values, last one is combined_json
+                # Return all 8 + duplicate the last one for state
+                return result + (result[-1],)  # Add JSON to state
+            
+            process_fn = process_with_state
+            outputs_list = [
+                stt_metadata_output,  # metadata_json
+                gr.File(visible=False),  # json_file
+                gr.File(visible=False),  # sensevoice_txt
+                gr.File(visible=False),  # whisperv3_txt
+                stt_zip_download,  # zip_file
+                stt_sensevoice_labeled_output,  # sensevoice_labeled
+                stt_whisperv3_labeled_output,  # whisperv3_labeled
+                stt_json_output,  # combined_json
+                output_json_state  # state for chaining
+            ]
+        else:
+            # No state needed, use original function
+            process_fn = process_audio_or_folder
+            outputs_list = [
                 stt_metadata_output,  # metadata_json
                 gr.File(visible=False),  # json_file
                 gr.File(visible=False),  # sensevoice_txt
@@ -2243,5 +2292,22 @@ def create_stt_tab():
                 stt_whisperv3_labeled_output,  # whisperv3_labeled
                 stt_json_output  # combined_json
             ]
+        
+        stt_process_btn.click(
+            fn=process_fn,
+            inputs=[
+                stt_audio_input, 
+                stt_language_dropdown, 
+                stt_use_sensevoice, 
+                stt_use_whisperv3_cantonese, 
+                stt_overwrite_diarization, 
+                gr.Number(value=100, visible=False), 
+                stt_use_enhanced_format,
+                stt_apply_corrections,
+                stt_correction_json,
+                stt_vad_model,
+                stt_max_segment_time
+            ],
+            outputs=outputs_list
         )
 

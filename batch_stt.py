@@ -311,15 +311,22 @@ def main():
     # Initialize the SenseVoice model (global)
     global model
     print(f"Loading SenseVoice model: {model_name} ...")
+    
+    # Determine device (use GPU if available)
+    device_str = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device_info = f"GPU: {torch.cuda.get_device_name(0)}" if torch.cuda.is_available() else "CPU"
+    print(f"Using device: {device_info}")
+    
     try:
         model = AutoModel(
             model=model_name,
-            vad_model="iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
+            vad_model="fsmn-vad",
             vad_kwargs={"max_single_segment_time": 30000},
             trust_remote_code=False,
             disable_update=True,
+            device=device_str
         )
-        print("Model loaded successfully!")
+        print(f"Model loaded successfully on {device_info}!")
     except Exception as e:
         print(f"Failed to load model '{model_name}': {e}")
     

@@ -256,8 +256,8 @@ DEFAULT_SYSTEM_MESSAGE = """你是一位精通粵語的香港股市分析專家�
 2. 修正任何可能的Speech-to-Text誤差
 3. **如果你修正了股票名稱（即轉錄文本中的詞與正確股票名稱不同），請在 original_word 欄位中提供轉錄文本中的原始詞語**
 4. **提取交易數量和價格信息**（如果在對話中提及）
-5. 評估每個識別的置信度（high/medium/low）
-6. 評估對話與該股票的相關程度（relevance_score）：
+5. 評估每個識別的置信度（**必須使用文字字串: "high", "medium", 或 "low"，不要使用數字**）
+6. 評估對話與該股票的相關程度（relevance_score，使用數字 0.0 到 1.0）：
    - 0.0: 沒有實質討論（僅背景噪音或無關提及）
    - 0.5: 簡短提及或詢問（例如：問價、一般查詢）
    - 1.0: 積極討論或交易（例如：下單、詳細分析、交易確認）
@@ -353,6 +353,34 @@ def extract_stocks_with_single_llm(
         
         # Parse the response
         try:
+            # Pre-process response to fix common LLM mistakes (e.g., numeric confidence instead of string)
+            try:
+                # Try to parse JSON first
+                json_start = response_content.find("{")
+                json_end = response_content.rfind("}") + 1
+                if json_start >= 0 and json_end > json_start:
+                    json_str = response_content[json_start:json_end]
+                    temp_data = json.loads(json_str)
+                    
+                    # Fix confidence field if it's numeric
+                    if "stocks" in temp_data:
+                        for stock in temp_data["stocks"]:
+                            if "confidence" in stock and isinstance(stock["confidence"], (int, float)):
+                                # Convert numeric confidence to string
+                                conf_val = stock["confidence"]
+                                if conf_val >= 0.8:
+                                    stock["confidence"] = "high"
+                                elif conf_val >= 0.5:
+                                    stock["confidence"] = "medium"
+                                else:
+                                    stock["confidence"] = "low"
+                    
+                    # Replace response_content with fixed JSON
+                    response_content = json.dumps(temp_data, ensure_ascii=False, indent=2)
+            except:
+                # If pre-processing fails, continue with original response
+                pass
+            
             parsed_result: ConversationStockExtraction = parser.parse(response_content)
             
             # Convert quantities to numeric format

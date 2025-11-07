@@ -897,8 +897,13 @@ def verify_transactions(
         return (error_msg, error_json_str, "", "", "")
 
 
-def create_trade_verification_tab():
-    """Create and return the Trade Verification tab"""
+def create_trade_verification_tab(input_transaction_state=None):
+    """
+    Create and return the Trade Verification tab
+    
+    Args:
+        input_transaction_state: Optional gr.State for transaction JSON from previous tab
+    """
     with gr.Tab("🔍 Trade Verification"):
         with gr.Row():
             with gr.Column(scale=1):
@@ -910,6 +915,14 @@ def create_trade_verification_tab():
                     lines=20,
                     info="Paste the JSON output from Transaction Analysis tab (metadata is extracted from each transaction)"
                 )
+                
+                # Add load button if transaction state is provided
+                if input_transaction_state is not None:
+                    load_transaction_btn = gr.Button(
+                        "📥 Load Transactions from Previous Tab",
+                        variant="secondary",
+                        size="sm"
+                    )
                 
                 gr.Markdown("#### ⚙️ Settings")
                 
@@ -993,4 +1006,18 @@ def create_trade_verification_tab():
                 report_status_box,
             ],
         )
+        
+        # Connect load button if transaction state is provided
+        if input_transaction_state is not None:
+            def load_transaction_from_state(transaction_json):
+                """Load transaction JSON from shared state"""
+                if transaction_json:
+                    return transaction_json
+                return "⚠️ No transaction data from previous tab. Please run Transaction Analysis tab first."
+            
+            load_transaction_btn.click(
+                fn=load_transaction_from_state,
+                inputs=[input_transaction_state],
+                outputs=[transaction_json_box]
+            )
 

@@ -433,7 +433,7 @@ def transcribe_enhanced_audio(audio_path, language="yue", model_name="iic/SenseV
     print("\n⚙️  Loading SenseVoice model...")
     model = AutoModel(
         model=model_name,
-        vad_model="iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
+        vad_model="fsmn-vad",
         vad_kwargs={"max_single_segment_time": 30000},
         trust_remote_code=False,
         disable_update=True,
