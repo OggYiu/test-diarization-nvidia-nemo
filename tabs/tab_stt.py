@@ -2126,8 +2126,8 @@ def create_stt_tab():
     "correct_word": "阿里巴巴"
   },
   {
-    "wrong_words": ["紙金","紫金"],
-    "correct_word": "紙黃金"
+    "wrong_words": ["紙金"],
+    "correct_word": "紫金"
   }
 ]""",
                     lines=6,
