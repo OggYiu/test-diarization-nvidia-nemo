@@ -828,12 +828,27 @@ Example:
         return (error_msg, error_json_str, f"❌ CSV save skipped due to error")
 
 
-def create_conversation_record_analysis_tab():
-    """Create and return the Conversation Record Analysis tab"""
+def create_conversation_record_analysis_tab(input_json_state=None, output_analysis_state=None):
+    """
+    Create and return the Conversation Record Analysis tab
+    
+    Args:
+        input_json_state: Optional gr.State component to receive conversation JSON from STT tab
+        output_analysis_state: Optional gr.State to output analysis JSON for next tabs
+    """
     with gr.Tab("🎯 Conversation Record Analysis"):
         with gr.Row():
             with gr.Column(scale=1):
                 gr.Markdown("#### 📥 Input")
+                
+                # Add "Load from STT Tab" button if state is provided
+                if input_json_state is not None:
+                    load_from_stt_btn = gr.Button(
+                        "📥 Load from STT Tab",
+                        variant="secondary",
+                        size="sm"
+                    )
+                    gr.Markdown("*Load conversation JSON from the STT tab or paste manually below*")
                 
                 conversation_json_box = gr.Textbox(
                     label="Conversation JSON",
@@ -917,22 +932,64 @@ def create_conversation_record_analysis_tab():
                     info="Complete analysis including all trade records and confidence scores"
                 )
         
-        # Connect the button
-        analyze_btn.click(
-            fn=analyze_conversation_records,
-            inputs=[
-                conversation_json_box,
-                trades_file_box,
-                client_id_box,
-                model_dropdown,
-                ollama_url_box,
-                temperature_slider,
-                combined_analysis_checkbox,
-            ],
-            outputs=[
-                results_box,
-                json_output_box,
-                csv_status_box,
-            ],
+        # Connect the analyze button
+        # If output state is provided, also update it
+        if output_analysis_state is not None:
+            def analyze_with_state(*args):
+                """Wrapper that outputs JSON to state"""
+                result = analyze_conversation_records(*args)
+                # result is (formatted_text, json_output, csv_status)
+                # Return all 3 + json_output again for state
+                return result + (result[1],)  # result[1] is json_output_str
+            
+            analyze_btn.click(
+                fn=analyze_with_state,
+                inputs=[
+                    conversation_json_box,
+                    trades_file_box,
+                    client_id_box,
+                    model_dropdown,
+                    ollama_url_box,
+                    temperature_slider,
+                    combined_analysis_checkbox,
+                ],
+                outputs=[
+                    results_box,
+                    json_output_box,
+                    csv_status_box,
+                    output_analysis_state,  # state for chaining
+                ],
+            )
+        else:
+            analyze_btn.click(
+                fn=analyze_conversation_records,
+                inputs=[
+                    conversation_json_box,
+                    trades_file_box,
+                    client_id_box,
+                    model_dropdown,
+                    ollama_url_box,
+                    temperature_slider,
+                    combined_analysis_checkbox,
+                ],
+                outputs=[
+                    results_box,
+                    json_output_box,
+                    csv_status_box,
+                ],
+            )
+        
+        # Connect the load from STT button if state is provided
+        if input_json_state is not None:
+            def load_from_state(json_data):
+                """Load JSON data from shared state (STT tab)"""
+                if json_data:
+                    return json_data
+                return "⚠️ No data from STT tab. Please run the STT tab first."
+            
+            load_from_stt_btn.click(
+                fn=load_from_state,
+                inputs=[input_json_state],
+                outputs=[conversation_json_box]
         )
 

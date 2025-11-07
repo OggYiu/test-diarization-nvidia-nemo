@@ -143,9 +143,55 @@ def apply_text_corrections(text_content: str, correction_json: str) -> tuple[str
                     return text_content, f"❌ All items in 'wrong_words' must be strings"
                 
                 if wrong_word in corrected_text:
-                    count = corrected_text.count(wrong_word)
-                    corrected_text = corrected_text.replace(wrong_word, correct_word)
-                    corrections_applied.append(f"'{wrong_word}' → '{correct_word}' ({count}x)")
+                    # Use a custom replacement function to avoid replacing text inside brackets
+                    # and to avoid replacing wrong words that are already part of the correct phrase
+                    import re
+                    pattern = re.escape(wrong_word)
+                    
+                    def replace_func(match):
+                        # Check if this match is inside brackets by looking at the context
+                        start_pos = match.start()
+                        end_pos = match.end()
+                        
+                        # Count opening and closing brackets before this position
+                        text_before = corrected_text[:start_pos]
+                        open_count = text_before.count('(')
+                        close_count = text_before.count(')')
+                        
+                        # If we're inside brackets, don't replace
+                        if open_count > close_count:
+                            return match.group(0)  # Return original text
+                        
+                        # Check if this match is already part of the correct word/phrase
+                        # Extract surrounding context to see if it forms the correct word
+                        correct_word_len = len(correct_word)
+                        wrong_word_len = len(wrong_word)
+                        
+                        # Check all possible positions where correct_word could contain this wrong_word
+                        for offset in range(correct_word_len - wrong_word_len + 1):
+                            # Check if correct_word contains wrong_word at this offset
+                            if correct_word[offset:offset + wrong_word_len] == wrong_word:
+                                # Extract the corresponding context from corrected_text
+                                context_start = start_pos - offset
+                                context_end = context_start + correct_word_len
+                                
+                                # Make sure we're within bounds
+                                if context_start >= 0 and context_end <= len(corrected_text):
+                                    context = corrected_text[context_start:context_end]
+                                    # If the context matches the correct word, skip replacement
+                                    if context == correct_word:
+                                        return match.group(0)  # Return original text
+                        
+                        # Otherwise, apply the correction
+                        return f"{match.group(0)}({correct_word})"
+                    
+                    # Apply replacement
+                    new_text = re.sub(pattern, replace_func, corrected_text)
+                    count = corrected_text.count(wrong_word) - new_text.count(wrong_word)
+                    
+                    if count > 0:
+                        corrected_text = new_text
+                        corrections_applied.append(f"'{wrong_word}' → '{wrong_word}({correct_word})' ({count}x)")
         
         # Return corrected text with success
         if corrections_applied:
@@ -2120,11 +2166,7 @@ def create_stt_tab(output_json_state=None):
   },
   {
     "wrong_words": ["排"],
-    "correct_word": "掛"
-  },
-  {
-    "wrong_words": ["掛單"],
-    "correct_word": "掛"
+    "correct_word": "掛單"
   },
   {
     "wrong_words": ["掛"],
@@ -2141,10 +2183,6 @@ def create_stt_tab(output_json_state=None):
   {
     "wrong_words": ["固"],
     "correct_word": "股"
-  },
-  {
-    "wrong_words": ["阿里巴巴"],
-    "correct_word": "巴巴"
   },
   {
     "wrong_words": ["巴巴", "爸爸", "爸巴", "巴爸"],

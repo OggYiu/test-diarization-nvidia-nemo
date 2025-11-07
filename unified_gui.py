@@ -18,7 +18,8 @@ from tabs import (
     # create_text_correction_tab,
     # create_llm_chat_tab,
     create_conversation_record_analysis_tab,
-    create_csv_stock_enrichment_tab,
+    create_compliance_analysis_tab,
+    # create_csv_stock_enrichment_tab,
 )
 
 
@@ -37,10 +38,12 @@ def create_unified_interface():
         # SHARED STATE COMPONENTS - Data Pipeline
         # ====================================================================
         # These hidden state components pass data between tabs for chaining
-        # Complete chain: STT → JSON Batch Analysis → Transaction Analysis JSON → Trade Verification
+        # Complete chain: STT → JSON Batch Analysis → Transaction Analysis JSON → Trade Verification → Compliance Analysis
         shared_conversation_json = gr.State(None)  # Conversation JSON from STT
         shared_merged_stocks_json = gr.State(None)  # Merged stocks from JSON Batch Analysis
         shared_transaction_json = gr.State(None)  # Transaction analysis results
+        shared_trade_verification_json = gr.State(None)  # Trade verification results
+        shared_conversation_analysis_json = gr.State(None)  # Conversation record analysis results
         
         with gr.Tabs():
             # Create all tabs by calling their respective functions
@@ -77,11 +80,25 @@ def create_unified_interface():
             # create_milvus_search_tab()
             # create_transaction_stock_search_tab()
             
-            # Chain 4: Trade Verification (final step)
-            create_trade_verification_tab(input_transaction_state=shared_transaction_json)
+            # Chain 4: Trade Verification (outputs to shared state for compliance analysis)
+            create_trade_verification_tab(
+                input_transaction_state=shared_transaction_json,
+                output_verification_state=shared_trade_verification_json
+            )
             
-            create_conversation_record_analysis_tab()
-            create_csv_stock_enrichment_tab()
+            # Chain 5: Conversation Record Analysis (receives conversation JSON from STT, outputs to shared state)
+            create_conversation_record_analysis_tab(
+                input_json_state=shared_conversation_json,
+                output_analysis_state=shared_conversation_analysis_json
+            )
+            
+            # Chain 6: Compliance Analysis (final step - analyzes both verification and analysis results)
+            create_compliance_analysis_tab(
+                trade_verification_state=shared_trade_verification_json,
+                conversation_analysis_state=shared_conversation_analysis_json
+            )
+            
+            # create_csv_stock_enrichment_tab()
             # create_text_correction_tab()
             # create_llm_chat_tab()
     

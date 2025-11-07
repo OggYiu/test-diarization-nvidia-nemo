@@ -869,6 +869,147 @@ def verify_transactions(
             # Add verification to JSON analysis
             json_analysis["transaction_verifications"].append(verification_json)
         
+        # ============================================
+        # ANALYZE MISSING/FAILED DETECTIONS
+        # ============================================
+        results_text += f"\n{'='*80}\n"
+        results_text += f"📊 MISSING/FAILED DETECTION ANALYSIS\n"
+        results_text += f"{'='*80}\n\n"
+        
+        # Define thresholds
+        NO_MATCH_THRESHOLD = 0.0  # No matches found
+        LOW_CONFIDENCE_THRESHOLD = 50.0  # Below 50% confidence
+        
+        # Track different categories
+        no_match_transactions = []
+        low_confidence_transactions = []
+        successful_transactions = []
+        
+        for verification in json_analysis["transaction_verifications"]:
+            tx_idx = verification["transaction_index"]
+            tx_details = verification["transaction_details"]
+            tx_summary = verification["verification_summary"]
+            
+            best_confidence = tx_summary.get("best_match_confidence", 0.0)
+            total_matches = tx_summary.get("total_matches_found", 0)
+            
+            # Categorize the transaction
+            if total_matches == 0 or best_confidence == NO_MATCH_THRESHOLD:
+                no_match_transactions.append({
+                    "index": tx_idx,
+                    "details": tx_details,
+                    "summary": tx_summary
+                })
+            elif best_confidence < LOW_CONFIDENCE_THRESHOLD:
+                low_confidence_transactions.append({
+                    "index": tx_idx,
+                    "details": tx_details,
+                    "summary": tx_summary,
+                    "best_confidence": best_confidence
+                })
+            else:
+                successful_transactions.append({
+                    "index": tx_idx,
+                    "details": tx_details,
+                    "summary": tx_summary,
+                    "best_confidence": best_confidence
+                })
+        
+        # Display summary statistics
+        total_tx = len(transactions)
+        total_no_match = len(no_match_transactions)
+        total_low_conf = len(low_confidence_transactions)
+        total_success = len(successful_transactions)
+        
+        results_text += f"📈 VERIFICATION SUMMARY:\n"
+        results_text += f"  Total Transactions Analyzed: {total_tx}\n"
+        results_text += f"  ✅ Successfully Verified (≥{LOW_CONFIDENCE_THRESHOLD}% confidence): {total_success}\n"
+        results_text += f"  ⚠️ Low Confidence Matches (<{LOW_CONFIDENCE_THRESHOLD}% confidence): {total_low_conf}\n"
+        results_text += f"  ❌ No Matches Found: {total_no_match}\n"
+        results_text += f"\n"
+        
+        # Calculate success rate
+        if total_tx > 0:
+            success_rate = (total_success / total_tx) * 100
+            results_text += f"🎯 Verification Success Rate: {success_rate:.1f}%\n"
+            results_text += f"\n"
+        
+        # Show detailed breakdown of failed/low confidence transactions
+        if no_match_transactions:
+            results_text += f"\n{'─'*80}\n"
+            results_text += f"❌ TRANSACTIONS WITH NO MATCHES ({len(no_match_transactions)})\n"
+            results_text += f"{'─'*80}\n"
+            
+            for item in no_match_transactions:
+                idx = item["index"]
+                details = item["details"]
+                summary = item["summary"]
+                
+                results_text += f"\n🔴 Transaction #{idx}:\n"
+                results_text += f"  📅 DateTime: {details.get('hkt_datetime', 'N/A')}\n"
+                results_text += f"  Type: {details.get('type', 'N/A')}\n"
+                results_text += f"  Stock Code: {details.get('stock_code', 'N/A')}\n"
+                results_text += f"  Stock Name: {details.get('stock_name', 'N/A')}\n"
+                results_text += f"  Quantity: {details.get('quantity', 'N/A')}\n"
+                results_text += f"  Price: {details.get('price', 'N/A')}\n"
+                results_text += f"  LLM Confidence: {details.get('llm_confidence_score', 'N/A')}\n"
+                results_text += f"  Status: {summary.get('summary', 'No match found')}\n"
+                results_text += f"\n"
+        
+        if low_confidence_transactions:
+            results_text += f"\n{'─'*80}\n"
+            results_text += f"⚠️ TRANSACTIONS WITH LOW CONFIDENCE MATCHES ({len(low_confidence_transactions)})\n"
+            results_text += f"{'─'*80}\n"
+            
+            for item in low_confidence_transactions:
+                idx = item["index"]
+                details = item["details"]
+                summary = item["summary"]
+                best_conf = item["best_confidence"]
+                
+                results_text += f"\n🟡 Transaction #{idx}: (Best Match: {best_conf:.1f}%)\n"
+                results_text += f"  📅 DateTime: {details.get('hkt_datetime', 'N/A')}\n"
+                results_text += f"  Type: {details.get('type', 'N/A')}\n"
+                results_text += f"  Stock Code: {details.get('stock_code', 'N/A')}\n"
+                results_text += f"  Stock Name: {details.get('stock_name', 'N/A')}\n"
+                results_text += f"  Quantity: {details.get('quantity', 'N/A')}\n"
+                results_text += f"  Price: {details.get('price', 'N/A')}\n"
+                results_text += f"  LLM Confidence: {details.get('llm_confidence_score', 'N/A')}\n"
+                results_text += f"  Status: {summary.get('summary', '')}\n"
+                results_text += f"\n"
+        
+        # Add missing detection analysis to JSON
+        json_analysis["missing_detection_analysis"] = {
+            "thresholds": {
+                "no_match": NO_MATCH_THRESHOLD,
+                "low_confidence": LOW_CONFIDENCE_THRESHOLD
+            },
+            "summary_statistics": {
+                "total_transactions": total_tx,
+                "successfully_verified": total_success,
+                "low_confidence_matches": total_low_conf,
+                "no_matches_found": total_no_match,
+                "verification_success_rate_percent": round((total_success / total_tx * 100) if total_tx > 0 else 0, 2)
+            },
+            "no_match_transactions": [
+                {
+                    "transaction_index": item["index"],
+                    "transaction_details": item["details"],
+                    "verification_summary": item["summary"]
+                }
+                for item in no_match_transactions
+            ],
+            "low_confidence_transactions": [
+                {
+                    "transaction_index": item["index"],
+                    "transaction_details": item["details"],
+                    "verification_summary": item["summary"],
+                    "best_match_confidence": item["best_confidence"]
+                }
+                for item in low_confidence_transactions
+            ]
+        }
+        
         results_text += f"\n{'='*80}\n"
         results_text += f"✅ VERIFICATION COMPLETE\n"
         results_text += f"{'='*80}\n"
@@ -897,12 +1038,13 @@ def verify_transactions(
         return (error_msg, error_json_str, "", "", "")
 
 
-def create_trade_verification_tab(input_transaction_state=None):
+def create_trade_verification_tab(input_transaction_state=None, output_verification_state=None):
     """
     Create and return the Trade Verification tab
     
     Args:
         input_transaction_state: Optional gr.State for transaction JSON from previous tab
+        output_verification_state: Optional gr.State to output verification JSON for next tabs
     """
     with gr.Tab("🔍 Trade Verification"):
         with gr.Row():
@@ -991,21 +1133,47 @@ def create_trade_verification_tab(input_transaction_state=None):
                 )
         
         # Connect the button
-        verify_btn.click(
-            fn=verify_transactions,
-            inputs=[
-                transaction_json_box,
-                trades_file_box,
-                time_window_slider,
-            ],
-            outputs=[
-                results_box,
-                json_analysis_box,
-                csv_records_box,
-                all_client_records_box,
-                report_status_box,
-            ],
-        )
+        # If output state is provided, also update it
+        if output_verification_state is not None:
+            def verify_with_state(*args):
+                """Wrapper that outputs JSON to state"""
+                result = verify_transactions(*args)
+                # result is (formatted_text, json_analysis, csv_records, all_client_records, report_status)
+                # Return all 5 + json_analysis again for state
+                return result + (result[1],)  # result[1] is json_analysis_str
+            
+            verify_btn.click(
+                fn=verify_with_state,
+                inputs=[
+                    transaction_json_box,
+                    trades_file_box,
+                    time_window_slider,
+                ],
+                outputs=[
+                    results_box,
+                    json_analysis_box,
+                    csv_records_box,
+                    all_client_records_box,
+                    report_status_box,
+                    output_verification_state,  # state for chaining
+                ],
+            )
+        else:
+            verify_btn.click(
+                fn=verify_transactions,
+                inputs=[
+                    transaction_json_box,
+                    trades_file_box,
+                    time_window_slider,
+                ],
+                outputs=[
+                    results_box,
+                    json_analysis_box,
+                    csv_records_box,
+                    all_client_records_box,
+                    report_status_box,
+                ],
+            )
         
         # Connect load button if transaction state is provided
         if input_transaction_state is not None:

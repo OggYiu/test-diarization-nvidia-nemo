@@ -19,6 +19,7 @@ from .tab_text_correction import create_text_correction_tab
 from .tab_json_batch_analysis import create_json_batch_analysis_tab
 from .tab_csv_stock_enrichment import create_csv_stock_enrichment_tab
 from .tab_conversation_record_analysis import create_conversation_record_analysis_tab
+from .tab_compliance_analysis import create_compliance_analysis_tab
 
 __all__ = [
     'create_file_metadata_tab',
@@ -39,7 +40,8 @@ __all__ = [
     'create_trade_verification_tab',
     'create_text_correction_tab',
     'create_json_batch_analysis_tab',
-    'create_csv_stock_enrichment_tab',
+    # 'create_csv_stock_enrichment_tab',
     'create_conversation_record_analysis_tab',
+    'create_compliance_analysis_tab',
 ]
 
