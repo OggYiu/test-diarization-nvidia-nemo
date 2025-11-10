@@ -5,8 +5,8 @@ This file contains model options used across different modules.
 
 # Common model options for Ollama LLM
 MODEL_OPTIONS = [
-    "qwen3:32b",
     "qwen3:14b",
+    "qwen3:32b",
     "qwen3:8b",
     "gpt-oss:20b",
     "gemma3:27b",
