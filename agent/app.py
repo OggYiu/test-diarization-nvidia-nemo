@@ -1,6 +1,7 @@
 from langchain.chat_models import init_chat_model
 from tools.audio_chopper_tool import chop_audio_by_rttm
 from tools.diarize_tool import diarize_audio
+from tools.stt_tool import transcribe_audio_segments
 
 
 model = init_chat_model(
@@ -11,7 +12,7 @@ model = init_chat_model(
 
 
 # Augment the LLM with tools
-tools = [diarize_audio, chop_audio_by_rttm]
+tools = [diarize_audio, chop_audio_by_rttm, transcribe_audio_segments]
 tools_by_name = {tool.name: tool for tool in tools}
 model_with_tools = model.bind_tools(tools)
 
@@ -39,7 +40,9 @@ def llm_call(state: dict):
                         "For audio analysis workflows:\n"
                         "1. Use diarize_audio tool first to identify speakers and when they spoke\n"
                         "2. Use chop_audio_by_rttm tool to split the audio into speaker segments based on diarization results\n"
-                        "These tools work together: diarization provides RTTM data, which is then used to chop the audio."
+                        "3. Use transcribe_audio_segments tool to transcribe the chopped audio segments using SenseVoiceSmall\n"
+                        "These tools work together: diarization provides RTTM data, which is used to chop the audio, "
+                        "and then the segments are transcribed to text."
                     )
                 ]
                 + state["messages"]
@@ -105,11 +108,36 @@ print("Agent graph saved to agent_graph.png")
 
 # Invoke
 from langchain.messages import HumanMessage
+import os
 
 # Example 1: Audio diarization and chopping
 # First, diarize the audio to identify speakers
 # Then, chop the audio into segments based on the diarization results
-messages = [HumanMessage(content="Diarize the audio file 'assets/test_audio_files/[Dickson Lau 0489]_8330-96674941_20251013012751(880).wav' with 2 speakers, then chop it into speaker segments with 50ms padding.")]
+
+# Use absolute path to avoid path resolution issues
+current_dir = os.path.dirname(os.path.abspath(__file__))
+audio_file = os.path.join(current_dir, "assets", "test_audio_files", "[Dickson Lau]_8330-96674941_20251013035051(3360).wav")
+
+# Verify the file exists
+if not os.path.exists(audio_file):
+    print(f"❌ Audio file not found: {audio_file}")
+    print("\nAvailable files in test_audio_files:")
+    test_audio_dir = os.path.join(current_dir, "assets", "test_audio_files")
+    if os.path.exists(test_audio_dir):
+        for file in os.listdir(test_audio_dir):
+            if file.endswith(('.wav', '.mp3', '.flac')):
+                print(f"  - {file}")
+    exit(1)
+
+print(f"📁 Using audio file: {audio_file}")
+print(f"✅ File exists: {os.path.exists(audio_file)}")
+print(f"📊 File size: {os.path.getsize(audio_file) / (1024*1024):.2f} MB\n")
+
+# Convert Windows backslashes to forward slashes for LLM message
+# (LLMs can misinterpret backslashes, but Windows accepts forward slashes)
+audio_file_for_llm = audio_file.replace('\\', '/')
+
+messages = [HumanMessage(content=f"Diarize the audio file '{audio_file_for_llm}' with 2 speakers, then chop it into speaker segments with 50ms padding, and finally transcribe all the segments to text using SenseVoiceSmall.")]
 result = agent.invoke({"messages": messages})
 for m in result["messages"]:
     m.pretty_print()

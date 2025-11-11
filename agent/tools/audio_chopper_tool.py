@@ -2,6 +2,8 @@ from langchain.tools import tool
 import os
 import tempfile
 import sys
+import shutil
+import re
 from pydub import AudioSegment
 from pathlib import Path
 
@@ -147,6 +149,7 @@ def chop_audio_file(wav_path, segments, output_folder, padding_ms=100):
               f"duration: {duration_sec:.2f}s, speaker: {speaker})")
 
 
+
 @tool
 def chop_audio_by_rttm(audio_filepath: str, rttm_content: str = None, rttm_filepath: str = None, 
                         output_dir: str = None, padding_ms: int = 100) -> dict:
@@ -186,10 +189,21 @@ def chop_audio_by_rttm(audio_filepath: str, rttm_content: str = None, rttm_filep
                 "error": "Must provide either rttm_content or rttm_filepath"
             }
         
-        # Create output directory if not provided, using consistent structure: output/chopped_segments/file_name
+        # Create output directory if not provided, using consistent structure with absolute path
         if output_dir is None:
+            # Get the agent directory
+            agent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             audio_basename = os.path.splitext(os.path.basename(audio_filepath))[0]
-            output_dir = os.path.join("output", "chopped_segments", audio_basename)
+            
+            # Sanitize the directory name to avoid special character issues
+            output_dir = os.path.join(agent_dir, "output", "audio_segments", audio_basename)
+        
+        print(f"📂 Chopping output directory: {output_dir}")
+        
+        # Always clean the output directory to ensure fresh results
+        if os.path.exists(output_dir):
+            shutil.rmtree(output_dir)
+            print(f"🧹 Cleaned existing output directory: {output_dir}")
         
         os.makedirs(output_dir, exist_ok=True)
         

@@ -8,6 +8,141 @@ from pydub import AudioSegment
 import argparse
 
 
+def read_rttm_file(rttm_path):
+    """
+    Read an RTTM file and extract speaker segments.
+    
+    Args:
+        rttm_path: Path to the RTTM file
+        
+    Returns:
+        List of dictionaries containing segment information:
+        [{'filename': str, 'speaker': str, 'start': float, 'duration': float, 'end': float}, ...]
+    """
+    segments = []
+    
+    with open(rttm_path, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+
+            parts = line.split()
+            if len(parts) < 4:
+                continue
+
+            # RTTM lines are space-separated but filenames may contain spaces
+            # Strategy: find the first index `i` such that parts[i] and parts[i+1]
+            # can both be parsed as floats — these correspond to start and duration.
+            # The channel token is then at i-1, and the filename is everything
+            # between parts[1] and parts[i-1] (exclusive of channel token).
+            start_idx = None
+            for i in range(2, len(parts) - 1):
+                try:
+                    # require parts[i] and parts[i+1] be numeric
+                    _ = float(parts[i])
+                    _ = float(parts[i + 1])
+                except Exception:
+                    continue
+
+                # prefer the pair where the token after duration is non-numeric
+                # (RTTM usually has '<NA>' after duration)
+                next_is_numeric = False
+                if i + 2 < len(parts):
+                    try:
+                        _ = float(parts[i + 2])
+                        next_is_numeric = True
+                    except Exception:
+                        next_is_numeric = False
+
+                if not next_is_numeric:
+                    start_idx = i
+                    break
+
+                # otherwise keep searching (avoid selecting channel as start)
+
+            if start_idx is None:
+                # Couldn't detect start/duration pair; skip line
+                continue
+
+            channel_idx = start_idx - 1
+            # filename spans parts[1:channel_idx]
+            filename = ' '.join(parts[1:channel_idx]) if channel_idx > 1 else parts[1]
+
+            try:
+                start = float(parts[start_idx])
+                duration = float(parts[start_idx + 1])
+            except Exception:
+                # fallback if parsing failed
+                continue
+
+            # speaker id is typically at offset start_idx + 4 in RTTM
+            spk_idx = start_idx + 4
+            if spk_idx < len(parts):
+                speaker = parts[spk_idx]
+            else:
+                # fallback: try last token
+                speaker = parts[-1]
+
+            segment = {
+                'filename': filename,
+                'start': start,
+                'duration': duration,
+                'speaker': speaker,
+            }
+            segment['end'] = segment['start'] + segment['duration']
+            segments.append(segment)
+    
+    return segments
+
+
+def chop_audio_file(wav_path, segments, output_folder, padding_ms=100):
+    """
+    Chop a WAV file into smaller segments based on diarization results.
+    
+    Args:
+        wav_path: Path to the WAV file
+        segments: List of segment dictionaries with 'start', 'duration', 'speaker'
+        output_folder: Folder to save chopped audio files
+        padding_ms: Padding in milliseconds to add before/after each segment (default: 100ms)
+    """
+    if not os.path.exists(wav_path):
+        print(f"Warning: WAV file not found: {wav_path}")
+        return
+    
+    # Create output folder if it doesn't exist
+    os.makedirs(output_folder, exist_ok=True)
+    
+    # Load audio file using pydub
+    print(f"Loading audio file: {wav_path}")
+    audio = AudioSegment.from_wav(wav_path)
+    audio_duration_sec = len(audio) / 1000.0
+    
+    base_filename = Path(wav_path).stem
+    
+    # Process each segment
+    for i, segment in enumerate(segments, 1):
+        start_ms = max(0, segment['start'] * 1000 - padding_ms)
+        end_ms = min(len(audio), segment['end'] * 1000 + padding_ms)
+        
+        # Extract the segment
+        segment_audio = audio[start_ms:end_ms]
+        
+        # Create output filename with start time, duration, and speaker
+        speaker = segment['speaker']
+        start_time_formatted = int(segment['start'] * 1000)  # Convert to milliseconds as integer
+        duration_formatted = int(segment['duration'] * 1000)  # Convert to milliseconds as integer
+        output_filename = f"segment_{i:03d}_{start_time_formatted:04d}_{duration_formatted:04d}_{speaker}.wav"
+        output_path = os.path.join(output_folder, output_filename)
+        
+        # Save the segment
+        segment_audio.export(output_path, format="wav")
+        
+        duration_sec = segment['duration']
+        print(f"  Saved segment {i}: {output_filename} "
+              f"({segment['start']:.2f}s - {segment['end']:.2f}s, "
+              f"duration: {duration_sec:.2f}s, speaker: {speaker})")
+
 
 def read_all_rttm_files(rttm_folder):
     """

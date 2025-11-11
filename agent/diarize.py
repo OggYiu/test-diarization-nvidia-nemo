@@ -8,6 +8,8 @@ import json
 import shutil
 import platform
 import urllib.request
+import re
+import tempfile
 from pathlib import Path
 from omegaconf import OmegaConf
 
@@ -22,6 +24,51 @@ except ModuleNotFoundError:
     print("  pip install nemo_toolkit[all] --extra-index-url https://pypi.ngc.nvidia.com")
     print("After installing, re-run this script.")
     raise
+
+
+def has_special_chars(filename: str) -> bool:
+    """
+    Check if filename contains characters that may cause issues with NeMo.
+    
+    Args:
+        filename: The filename to check
+        
+    Returns:
+        True if special characters are found, False otherwise
+    """
+    # Characters that can cause issues: brackets, parentheses in some contexts
+    # We're being conservative and checking for common problematic characters
+    special_chars = r'[\[\]]'
+    return bool(re.search(special_chars, filename))
+
+
+def create_temp_audio_copy(audio_filepath: str, temp_dir: str) -> tuple[str, str]:
+    """
+    Create a temporary copy of the audio file with a sanitized filename.
+    
+    Args:
+        audio_filepath: Original audio file path
+        temp_dir: Directory to store temporary file
+        
+    Returns:
+        Tuple of (temp_filepath, original_basename)
+    """
+    os.makedirs(temp_dir, exist_ok=True)
+    
+    original_path = Path(audio_filepath)
+    original_basename = original_path.stem
+    extension = original_path.suffix
+    
+    # Create a sanitized filename using timestamp
+    import time
+    sanitized_name = f"temp_audio_{int(time.time() * 1000)}{extension}"
+    temp_filepath = os.path.join(temp_dir, sanitized_name)
+    
+    # Copy the file
+    shutil.copy2(audio_filepath, temp_filepath)
+    print(f"🔧 Created temporary copy with sanitized filename: {sanitized_name}")
+    
+    return temp_filepath, original_basename
 
 
 def download_config(output_dir: str, domain_type: str = "telephonic") -> str:
@@ -112,40 +159,10 @@ def diarize(audio_filepath: str, output_dir: str, num_speakers: int = 2, domain_
         FileNotFoundError: If audio file or RTTM output is not found
         Exception: If diarization fails
     """
-    # Check if output directory already exists with results
-    audio_basename = Path(audio_filepath).stem
-    rttm_file = Path(output_dir) / "pred_rttms" / f"{audio_basename}.rttm"
-    
-    if os.path.exists(output_dir) and rttm_file.exists():
-        print(f"\n{'='*60}")
-        print(f"♻️  Loading existing diarization results")
-        print(f"{'='*60}")
-        print(f"📁 Audio file: {audio_filepath}")
-        print(f"📂 Output directory: {output_dir}")
-        print(f"📄 RTTM file: {rttm_file}")
-        print(f"{'='*60}\n")
-        
-        with open(rttm_file, 'r') as f:
-            rttm_content = f.read()
-        
-        # Print summary
-        lines = rttm_content.strip().split('\n')
-        speakers = set()
-        for line in lines:
-            if line.strip():
-                parts = line.split()
-                if len(parts) >= 8:
-                    speakers.add(parts[7])
-        
-        print(f"📊 Loaded {len(lines)} segments from {len(speakers)} speakers: {', '.join(sorted(speakers))}")
-        print(f"✅ Existing results loaded successfully!\n")
-        
-        return rttm_content
-    
-    # Clean output directory if it exists but incomplete
+    # Always clean the output directory to ensure fresh results
     if os.path.exists(output_dir):
         shutil.rmtree(output_dir)
-        print(f"🧹 Cleaned incomplete output directory: {output_dir}")
+        print(f"🧹 Cleaned existing output directory: {output_dir}")
     
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
@@ -164,10 +181,20 @@ def diarize(audio_filepath: str, output_dir: str, num_speakers: int = 2, domain_
     if not audio_path.exists():
         raise FileNotFoundError(f"Audio file not found: {audio_filepath}")
     
-    # Create manifest file
+    # Always use a temporary file for NeMo processing to avoid any filename-related issues
+    # but keep output folder and other references with the original filename
+    original_filename = audio_path.name
+    print(f"🔧 Creating temporary copy with sanitized filename for NeMo processing...")
+    temp_dir = os.path.join(output_dir, "temp_audio")
+    temp_file_path, _ = create_temp_audio_copy(str(audio_path), temp_dir)
+    audio_path_for_nemo = Path(temp_file_path)
+    using_temp_file = True
+    print(f"✅ Using temporary file for NeMo: {audio_path_for_nemo.name}\n")
+    
+    # Create manifest file (use temp file path for NeMo)
     manifest_path = Path(output_dir) / "manifest.json"
     manifest_entry = {
-        "audio_filepath": str(audio_path),
+        "audio_filepath": str(audio_path_for_nemo),
         "offset": 0,
         "duration": None,  # Will be calculated automatically
         "label": "infer",
@@ -202,42 +229,63 @@ def diarize(audio_filepath: str, output_dir: str, num_speakers: int = 2, domain_
         print("✅ Diarization complete!")
         print(f"{'='*60}\n")
         
-        # Find and read RTTM file
-        audio_basename = Path(audio_filepath).stem
-        rttm_file = Path(output_dir) / "pred_rttms" / f"{audio_basename}.rttm"
+        # Find any RTTM file generated by NeMo in the pred_rttms directory
+        rttm_dir = Path(output_dir) / "pred_rttms"
+        final_rttm_file = rttm_dir / "diarization.rttm"
         
-        if rttm_file.exists():
-            print(f"📄 RTTM file: {rttm_file}")
-            with open(rttm_file, 'r') as f:
-                rttm_content = f.read()
-            
-            # Print summary
-            lines = rttm_content.strip().split('\n')
-            speakers = set()
-            for line in lines:
-                if line.strip():
-                    parts = line.split()
-                    if len(parts) >= 8:
-                        speakers.add(parts[7])
-            
-            print(f"📊 Detected {len(lines)} segments from {len(speakers)} speakers: {', '.join(sorted(speakers))}\n")
-            
-            return rttm_content
-        else:
-            # Fallback: try to find any .rttm file
-            rttm_dir = os.path.join(output_dir, 'pred_rttms')
-            if os.path.exists(rttm_dir):
-                rttm_files = [f for f in os.listdir(rttm_dir) if f.endswith('.rttm')]
-                if rttm_files:
-                    rttm_filepath = os.path.join(rttm_dir, rttm_files[0])
-                    print(f"📄 RTTM file: {rttm_filepath}")
-                    with open(rttm_filepath, 'r') as f:
-                        rttm_content = f.read()
-                    return rttm_content
-            
-            raise FileNotFoundError("❌ RTTM file not found. Check the output directory for results.")
+        if not rttm_dir.exists():
+            raise FileNotFoundError(f"❌ RTTM directory not found: {rttm_dir}")
+        
+        # Find any .rttm file in the directory
+        rttm_files = list(rttm_dir.glob("*.rttm"))
+        
+        if not rttm_files:
+            raise FileNotFoundError(f"❌ No RTTM files found in {rttm_dir}. Check the output directory for results.")
+        
+        # Use the first (and likely only) RTTM file found
+        generated_rttm_file = rttm_files[0]
+        print(f"📄 Found generated RTTM file: {generated_rttm_file}")
+        
+        # Rename to standard name to avoid long filename issues
+        if generated_rttm_file != final_rttm_file:
+            shutil.move(str(generated_rttm_file), str(final_rttm_file))
+            print(f"📄 Renamed RTTM file to: {final_rttm_file}")
+        
+        with open(final_rttm_file, 'r') as f:
+            rttm_content = f.read()
+        
+        # Print summary
+        lines = rttm_content.strip().split('\n')
+        speakers = set()
+        for line in lines:
+            if line.strip():
+                parts = line.split()
+                if len(parts) >= 8:
+                    speakers.add(parts[7])
+        
+        print(f"📊 Detected {len(lines)} segments from {len(speakers)} speakers: {', '.join(sorted(speakers))}\n")
+        
+        # Clean up temporary file if used
+        if using_temp_file and temp_file_path and os.path.exists(temp_file_path):
+            try:
+                temp_dir = os.path.dirname(temp_file_path)
+                shutil.rmtree(temp_dir)
+                print(f"🧹 Cleaned up temporary audio file\n")
+            except Exception as cleanup_error:
+                print(f"⚠️  Could not clean up temporary file: {cleanup_error}\n")
+        
+        return rttm_content
         
     except Exception as e:
+        # Clean up temporary file if used
+        if using_temp_file and temp_file_path and os.path.exists(temp_file_path):
+            try:
+                temp_dir = os.path.dirname(temp_file_path)
+                shutil.rmtree(temp_dir)
+                print(f"🧹 Cleaned up temporary audio file\n")
+            except Exception as cleanup_error:
+                print(f"⚠️  Could not clean up temporary file: {cleanup_error}\n")
+        
         print(f"\n❌ Error during diarization: {e}")
         print("\n💡 Troubleshooting tips:")
         print("  1. Make sure your audio file is in a supported format (WAV, FLAC, MP3)")
