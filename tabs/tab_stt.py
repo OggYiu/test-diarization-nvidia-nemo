@@ -634,8 +634,14 @@ def initialize_sensevoice_model(vad_model="fsmn-vad", max_single_segment_time=30
         print(f"Using device: {device_str}")
         print(f"Using VAD model: {vad_model}")
         print(f"Using max segment time: {max_single_segment_time}ms")
+        
+        # from modelscope import snapshot_download
+        # model_dir = snapshot_download('dengcunqin/SenseVoiceSmall_hotword')
+        # print(f"Model downloaded to: {model_dir}")
+        
         sensevoice_model = AutoModel(
             model="iic/SenseVoiceSmall",
+            # model="dengcunqin/SenseVoiceSmall_hotword",
             vad_model=vad_model,
             vad_kwargs={"max_single_segment_time": max_single_segment_time},
             trust_remote_code=False,
@@ -687,7 +693,7 @@ def initialize_whisperv3_cantonese_model():
         return status
 
 
-def transcribe_single_audio_sensevoice(audio_path, language="yue", use_cache=True):
+def transcribe_single_audio_sensevoice(audio_path, language="yue", use_cache=True, hotwords=""):
     """
     Transcribe a single audio file using SenseVoiceSmall model.
     
@@ -695,6 +701,7 @@ def transcribe_single_audio_sensevoice(audio_path, language="yue", use_cache=Tru
         audio_path: Path to audio file
         language: Language code for transcription
         use_cache: Whether to use cached results (default: True)
+        hotwords: Space-separated hotwords to boost recognition (default: "")
         
     Returns:
         dict: Transcription result with file, path, transcription, raw_transcription, and cache_hit
@@ -732,14 +739,22 @@ def transcribe_single_audio_sensevoice(audio_path, language="yue", use_cache=Tru
     # Run inference
     try:
         start_time = time.time()
-        result = sensevoice_model.generate(
-            input=audio_array,
-            cache={},
-            language=language,
-            use_itn=True,
-            batch_size_s=60,
-            merge_vad=True
-        )
+        
+        # Prepare generate parameters
+        generate_params = {
+            "input": audio_array,
+            "cache": {},
+            "language": language,
+            "use_itn": True,
+            "batch_size_s": 60,
+            "merge_vad": True
+        }
+        
+        # Add hotwords if provided
+        if hotwords and hotwords.strip():
+            generate_params["hotword"] = hotwords.strip()
+        
+        result = sensevoice_model.generate(**generate_params)
         end_time = time.time()
         processing_time = end_time - start_time
         
@@ -1029,7 +1044,7 @@ def identify_speakers_with_llm(conversation_text: str, broker_name: str, client_
         return conversation_text, error_msg, "speaker_0"
 
 
-def process_chop_and_transcribe(audio_file, language, use_sensevoice, use_whisperv3_cantonese, overwrite_diarization=False, padding_ms=100, use_enhanced_format=False, vad_model="fsmn-vad", max_single_segment_time=30000, progress=gr.Progress()):
+def process_chop_and_transcribe(audio_file, language, use_sensevoice, use_whisperv3_cantonese, overwrite_diarization=False, padding_ms=100, use_enhanced_format=False, vad_model="fsmn-vad", max_single_segment_time=30000, hotwords="", progress=gr.Progress()):
     """
     Integrated pipeline: Extract metadata, auto-diarize (with cache), chop audio based on RTTM, 
     transcribe the segments, and use LLM to identify speakers.
@@ -1241,7 +1256,7 @@ def process_chop_and_transcribe(audio_file, language, use_sensevoice, use_whispe
                 filename = os.path.basename(audio_path)
                 status += f"[{i+1}/{total_files}] {filename}\n"
                 
-                result = transcribe_single_audio_sensevoice(audio_path, language)
+                result = transcribe_single_audio_sensevoice(audio_path, language, use_cache=True, hotwords=hotwords)
                 if result:
                     sensevoice_results.append(result)
                     if result.get('cache_hit', False):
@@ -1463,7 +1478,7 @@ client_id: {metadata_result['data']['client_id']}
         return "", None, None, None, None, "", "", "", error_msg
 
 
-def process_batch_transcription(audio_files, zip_file, link_or_path, language, use_sensevoice, use_whisperv3_cantonese, vad_model="fsmn-vad", max_single_segment_time=30000, progress=gr.Progress()):
+def process_batch_transcription(audio_files, zip_file, link_or_path, language, use_sensevoice, use_whisperv3_cantonese, vad_model="fsmn-vad", max_single_segment_time=30000, hotwords="", progress=gr.Progress()):
     """
     Process multiple audio files for transcription.
     
@@ -1476,6 +1491,7 @@ def process_batch_transcription(audio_files, zip_file, link_or_path, language, u
         use_whisperv3_cantonese: Whether to use Whisper-v3-Cantonese model
         vad_model: VAD model to use (default: "fsmn-vad")
         max_single_segment_time: Maximum segment time in milliseconds (default: 30000)
+        hotwords: Space-separated hotwords to boost recognition (default: "")
     
     Returns:
         tuple: (json_file, sensevoice_txt_file, whisperv3_txt_file, zip_file, sensevoice_conversation, whisperv3_conversation)
@@ -1644,7 +1660,7 @@ def process_batch_transcription(audio_files, zip_file, link_or_path, language, u
                 filename = os.path.basename(audio_path)
                 status += f"[{i+1}/{total_files}] {filename}\n"
                 
-                result = transcribe_single_audio_sensevoice(audio_path, language)
+                result = transcribe_single_audio_sensevoice(audio_path, language, use_cache=True, hotwords=hotwords)
                 if result:
                     sensevoice_results.append(result)
                     if result.get('cache_hit', False):
@@ -1802,7 +1818,7 @@ def extract_timestamp_from_filename(filepath):
         return None
 
 
-def process_folder_batch(audio_input, language, use_sensevoice, use_whisperv3_cantonese, overwrite_diarization=False, padding_ms=100, use_enhanced_format=True, apply_corrections=False, correction_json="", vad_model="fsmn-vad", max_single_segment_time=30000, progress=gr.Progress()):
+def process_folder_batch(audio_input, language, use_sensevoice, use_whisperv3_cantonese, overwrite_diarization=False, padding_ms=100, use_enhanced_format=True, apply_corrections=False, correction_json="", vad_model="fsmn-vad", max_single_segment_time=30000, hotwords="", progress=gr.Progress()):
     """
     Process either a single audio file, multiple audio files, or a folder containing audio files.
     
@@ -1818,6 +1834,7 @@ def process_folder_batch(audio_input, language, use_sensevoice, use_whisperv3_ca
         correction_json: JSON string with correction rules
         vad_model: VAD model to use (default: "fsmn-vad")
         max_single_segment_time: Maximum segment time in milliseconds (default: 30000)
+        hotwords: Space-separated hotwords to boost recognition (default: "")
         
     Returns:
         tuple: (metadata_json, json_file, sensevoice_txt, whisperv3_txt, zip_file, 
@@ -1912,7 +1929,7 @@ def process_folder_batch(audio_input, language, use_sensevoice, use_whisperv3_ca
             # Process this single audio file
             result = process_chop_and_transcribe(
                 audio_file, language, use_sensevoice, use_whisperv3_cantonese, 
-                overwrite_diarization, padding_ms, use_enhanced_format, vad_model, max_single_segment_time, progress
+                overwrite_diarization, padding_ms, use_enhanced_format, vad_model, max_single_segment_time, hotwords, progress
             )
             
             metadata_json, json_file, sensevoice_txt, whisperv3_txt, zip_file, sensevoice_labeled, whisperv3_labeled, llm_log, status_message = result
@@ -2121,12 +2138,13 @@ def process_folder_batch(audio_input, language, use_sensevoice, use_whisperv3_ca
         return "", None, None, None, None, error_msg, error_msg, error_msg, ""
 
 
-def process_audio_or_folder(audio_input, language, use_sensevoice, use_whisperv3_cantonese, overwrite_diarization, padding_ms, use_enhanced_format, apply_corrections, correction_json, vad_model, max_single_segment_time, progress=gr.Progress()):
+def process_audio_or_folder(audio_input, language, use_sensevoice, use_whisperv3_cantonese, overwrite_diarization, padding_ms, use_enhanced_format, apply_corrections, correction_json, vad_model, max_single_segment_time, hotwords="", progress=gr.Progress()):
     """
     Wrapper function that handles both file upload and folder path inputs.
     
     Args:
         audio_input: File(s) from gr.File component
+        hotwords: Space-separated hotwords to boost recognition (default: "")
         Other args: Same as process_folder_batch
         
     Returns:
@@ -2141,7 +2159,7 @@ def process_audio_or_folder(audio_input, language, use_sensevoice, use_whisperv3
     
     return process_folder_batch(
         final_input, language, use_sensevoice, use_whisperv3_cantonese, 
-        overwrite_diarization, padding_ms, use_enhanced_format, apply_corrections, correction_json, vad_model, max_single_segment_time, progress
+        overwrite_diarization, padding_ms, use_enhanced_format, apply_corrections, correction_json, vad_model, max_single_segment_time, hotwords, progress
     )
 
 
@@ -2274,6 +2292,13 @@ def create_stt_tab(output_json_state=None):
                     info="Maximum single segment time in milliseconds"
                 )
                 
+                stt_hotwords = gr.Textbox(
+                    label="Hotwords (Optional)",
+                    value="",
+                    placeholder="Enter hotwords separated by spaces (e.g. 騰訊 阿里巴巴 匯豐)",
+                    info="Important words to boost recognition accuracy (space-separated)"
+                )
+                
                 stt_process_btn = gr.Button("🎯 Auto-Diarize & Transcribe", variant="primary", size="lg")
                 
             with gr.Column(scale=2):
@@ -2385,7 +2410,8 @@ def create_stt_tab(output_json_state=None):
                 stt_apply_corrections,
                 stt_correction_json,
                 stt_vad_model,
-                stt_max_segment_time
+                stt_max_segment_time,
+                stt_hotwords
             ],
             outputs=outputs_list
         )

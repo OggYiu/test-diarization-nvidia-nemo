@@ -1,0 +1,4 @@
+{"audio_filepath": "C:\\projects\\test-diarization\\agent\\test01.wav", "duration": 50, "label": "infer", "text": "_", "offset": 0}
+{"audio_filepath": "C:\\projects\\test-diarization\\agent\\test01.wav", "duration": 50.15, "label": "infer", "text": "_", "offset": 49.85}
+{"audio_filepath": "C:\\projects\\test-diarization\\agent\\test01.wav", "duration": 50.15, "label": "infer", "text": "_", "offset": 99.85}
+{"audio_filepath": "C:\\projects\\test-diarization\\agent\\test01.wav", "duration": 24.23000000000001, "label": "infer", "text": "_", "offset": 149.85}
