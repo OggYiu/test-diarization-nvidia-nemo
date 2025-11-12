@@ -112,15 +112,24 @@ def chop_audio_file(wav_path, segments, output_folder, padding_ms=100):
         padding_ms: Padding in milliseconds to add before/after each segment (default: 100ms)
     """
     if not os.path.exists(wav_path):
-        print(f"Warning: WAV file not found: {wav_path}")
-        return
+        error_msg = f"❌ WAV file not found: {wav_path}"
+        print(error_msg)
+        raise FileNotFoundError(error_msg)
     
     # Create output folder if it doesn't exist
     os.makedirs(output_folder, exist_ok=True)
     
     # Load audio file using pydub
-    print(f"Loading audio file: {wav_path}")
-    audio = AudioSegment.from_wav(wav_path)
+    print(f"📂 Loading audio file: {wav_path}")
+    print(f"📊 File size: {os.path.getsize(wav_path) / (1024*1024):.2f} MB")
+    
+    try:
+        audio = AudioSegment.from_wav(wav_path)
+        print(f"✅ Audio loaded successfully - Duration: {len(audio)/1000:.2f}s")
+    except Exception as e:
+        error_msg = f"❌ Failed to load audio file with pydub: {e}"
+        print(error_msg)
+        raise
     audio_duration_sec = len(audio) / 1000.0
     
     base_filename = Path(wav_path).stem
@@ -133,11 +142,11 @@ def chop_audio_file(wav_path, segments, output_folder, padding_ms=100):
         # Extract the segment
         segment_audio = audio[start_ms:end_ms]
         
-        # Create output filename with start time, duration, and speaker
+        # Create output filename with original filename, start time, duration, and speaker
         speaker = segment['speaker']
         start_time_formatted = int(segment['start'] * 1000)  # Convert to milliseconds as integer
         duration_formatted = int(segment['duration'] * 1000)  # Convert to milliseconds as integer
-        output_filename = f"segment_{i:03d}_{start_time_formatted:04d}_{duration_formatted:04d}_{speaker}.wav"
+        output_filename = f"{base_filename}_segment_{i:03d}_{start_time_formatted:04d}_{duration_formatted:04d}_{speaker}.wav"
         output_path = os.path.join(output_folder, output_filename)
         
         # Save the segment
@@ -152,7 +161,7 @@ def chop_audio_file(wav_path, segments, output_folder, padding_ms=100):
 
 @tool
 def chop_audio_by_rttm(audio_filepath: str, rttm_content: str = None, rttm_filepath: str = None, 
-                        output_dir: str = None, padding_ms: int = 100) -> dict:
+                        output_dir: str = None) -> str:
     """Chop an audio file into speaker segments based on RTTM diarization data.
     
     This tool splits an audio file into separate segments for each speaker turn based on
@@ -167,27 +176,17 @@ def chop_audio_by_rttm(audio_filepath: str, rttm_content: str = None, rttm_filep
         padding_ms: Padding in milliseconds to add before/after each segment (default: 100)
     
     Returns:
-        dict: Dictionary containing:
-            - success: Whether chopping succeeded
-            - output_dir: Directory containing chopped segments
-            - segments: List of segment information with file paths
-            - num_segments: Total number of segments created
-            - error: Error message if failed
+        str: Path to the directory containing the chopped audio segments
     """
+
     try:
         # Verify audio file exists
         if not os.path.exists(audio_filepath):
-            return {
-                "success": False,
-                "error": f"Audio file not found: {audio_filepath}"
-            }
+            return f"❌ Error: Audio file not found: {audio_filepath}"
         
         # Verify we have RTTM data
         if not rttm_content and not rttm_filepath:
-            return {
-                "success": False,
-                "error": "Must provide either rttm_content or rttm_filepath"
-            }
+            return "❌ Error: Must provide either rttm_content or rttm_filepath"
         
         # Create output directory if not provided, using consistent structure with absolute path
         if output_dir is None:
@@ -196,7 +195,7 @@ def chop_audio_by_rttm(audio_filepath: str, rttm_content: str = None, rttm_filep
             audio_basename = os.path.splitext(os.path.basename(audio_filepath))[0]
             
             # Sanitize the directory name to avoid special character issues
-            output_dir = os.path.join(agent_dir, "output", "audio_segments", audio_basename)
+            output_dir = os.path.join(agent_dir, "output", "chopped_segments", audio_basename)
         
         print(f"📂 Chopping output directory: {output_dir}")
         
@@ -211,10 +210,7 @@ def chop_audio_by_rttm(audio_filepath: str, rttm_content: str = None, rttm_filep
         if rttm_filepath:
             # Read from file
             if not os.path.exists(rttm_filepath):
-                return {
-                    "success": False,
-                    "error": f"RTTM file not found: {rttm_filepath}"
-                }
+                return f"❌ Error: RTTM file not found: {rttm_filepath}"
             segments = read_rttm_file(rttm_filepath)
         else:
             # Save RTTM content to temporary file
@@ -233,50 +229,18 @@ def chop_audio_by_rttm(audio_filepath: str, rttm_content: str = None, rttm_filep
         
         # Verify we have segments
         if not segments:
-            return {
-                "success": False,
-                "error": "No segments found in RTTM data"
-            }
+            return "❌ Error: No segments found in RTTM data"
         
         # Chop the audio file
+        padding_ms = 0
         chop_audio_file(audio_filepath, segments, output_dir, padding_ms)
         
-        # Get list of chopped files
-        chopped_files = sorted([
-            os.path.join(output_dir, f) 
-            for f in os.listdir(output_dir) 
-            if f.endswith('.wav')
-        ])
+        print(f"\n✅ Audio chopping complete!")
+        print(f"📊 Created {len(segments)} segments from {len(set(seg['speaker'] for seg in segments))} speakers")
+        print(f"📂 Segments saved to: {output_dir}\n")
         
-        # Build segment info list
-        segment_info = []
-        for idx, seg in enumerate(segments):
-            # Match the filename pattern from chop_audio_file
-            start_ms = int(seg['start'] * 1000)
-            duration_ms = int(seg['duration'] * 1000)
-            expected_filename = f"segment_{idx+1:03d}_{start_ms:04d}_{duration_ms:04d}_{seg['speaker']}.wav"
-            filepath = os.path.join(output_dir, expected_filename)
-            
-            segment_info.append({
-                "segment_number": idx + 1,
-                "filepath": filepath,
-                "speaker": seg['speaker'],
-                "start_time": seg['start'],
-                "duration": seg['duration'],
-                "end_time": seg['end']
-            })
-        
-        return {
-            "success": True,
-            "output_dir": output_dir,
-            "segments": segment_info,
-            "num_segments": len(segment_info),
-            "speakers": list(set(seg['speaker'] for seg in segments))
-        }
+        return output_dir
         
     except Exception as e:
-        return {
-            "success": False,
-            "error": str(e)
-        }
+        return f"❌ Error during audio chopping: {str(e)}"
 

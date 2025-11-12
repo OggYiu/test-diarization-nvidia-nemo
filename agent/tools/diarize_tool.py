@@ -43,10 +43,26 @@ def create_temp_audio_copy(audio_filepath: str, temp_dir: str) -> tuple[str, str
         
     Returns:
         Tuple of (temp_filepath, original_basename)
+        
+    Raises:
+        FileNotFoundError: If source file doesn't exist or is empty
+        IOError: If copy operation fails or destination file is invalid
     """
     os.makedirs(temp_dir, exist_ok=True)
     
     original_path = Path(audio_filepath)
+    
+    # Check if source file exists
+    if not original_path.exists():
+        raise FileNotFoundError(f"Source audio file does not exist: {audio_filepath}")
+    
+    # Check if source file is not empty
+    source_size = original_path.stat().st_size
+    if source_size == 0:
+        raise IOError(f"Source audio file is empty (0 bytes): {audio_filepath}")
+    
+    print(f"📊 Source file size: {source_size:,} bytes")
+    
     original_basename = original_path.stem
     extension = original_path.suffix
     
@@ -56,8 +72,30 @@ def create_temp_audio_copy(audio_filepath: str, temp_dir: str) -> tuple[str, str
     temp_filepath = os.path.join(temp_dir, sanitized_name)
     
     # Copy the file
-    shutil.copy2(audio_filepath, temp_filepath)
-    print(f"🔧 Created temporary copy with sanitized filename: {sanitized_name}")
+    try:
+        shutil.copy2(audio_filepath, temp_filepath)
+    except Exception as e:
+        raise IOError(f"Failed to copy audio file: {e}")
+    
+    # Verify the temp file was created
+    temp_path = Path(temp_filepath)
+    if not temp_path.exists():
+        raise IOError(f"Temporary file was not created: {temp_filepath}")
+    
+    # Verify the temp file is not empty
+    temp_size = temp_path.stat().st_size
+    if temp_size == 0:
+        raise IOError(f"Temporary file is empty after copy: {temp_filepath}")
+    
+    # Verify the file size matches the source (or is at least reasonable)
+    if temp_size != source_size:
+        raise IOError(
+            f"File size mismatch after copy. Source: {source_size} bytes, "
+            f"Temp: {temp_size} bytes"
+        )
+    
+    print(f"✅ Created temporary copy with sanitized filename: {sanitized_name}")
+    print(f"✅ Verified temp file size: {temp_size:,} bytes")
     
     return temp_filepath, original_basename
 
@@ -94,31 +132,32 @@ def download_config(output_dir: str, domain_type: str = "telephonic") -> str:
     return config_path
 
 
-def setup_config(audio_file: str, output_dir: str, domain_type: str = "telephonic", num_speakers: int = 2) -> OmegaConf:
+def setup_config(audio_file: str, output_dir: str, temp_dir: str, domain_type: str = "telephonic", num_speakers: int = 2) -> OmegaConf:
     """
     Setup configuration for speaker diarization using official NeMo config.
     
     Args:
         audio_file: Path to the input audio file
         output_dir: Directory to store output files
+        temp_dir: Temporary directory for manifest (to avoid special character issues)
         domain_type: Type of audio domain ('meeting' or 'telephonic')
         num_speakers: Number of speakers (default: 2)
     
     Returns:
         OmegaConf configuration object
     """
-    # Download official config
-    config_path = download_config(output_dir, domain_type)
+    # Download official config to temp directory to avoid special character issues
+    config_path = download_config(temp_dir, domain_type)
     
     # Load configuration
     cfg = OmegaConf.load(config_path)
     
-    # Create manifest path
-    manifest_path = os.path.join(output_dir, 'manifest.json')
+    # Create manifest path in temp directory to avoid special character issues
+    manifest_path = os.path.join(temp_dir, 'manifest.json')
     
-    # Update paths
+    # Update paths - use temp_dir for ALL NeMo operations to avoid special character issues
     cfg.diarizer.manifest_filepath = manifest_path
-    cfg.diarizer.out_dir = output_dir
+    cfg.diarizer.out_dir = temp_dir  # NeMo will write all intermediate files here
     
     # Fix for Windows multiprocessing issues
     if platform.system() == 'Windows':
@@ -144,7 +183,7 @@ def diarize(audio_filepath: str, output_dir: str, num_speakers: int = 2, domain_
         domain_type: Type of audio domain - 'meeting' or 'telephonic' (default: 'telephonic')
     
     Returns:
-        str: Content of the .rttm file containing diarization results
+        str: Path to the .rttm file containing diarization results
         
     Raises:
         FileNotFoundError: If audio file or RTTM output is not found
@@ -176,16 +215,24 @@ def diarize(audio_filepath: str, output_dir: str, num_speakers: int = 2, domain_
     # but keep output folder and other references with the original filename
     original_filename = audio_path.name
     print(f"🔧 Creating temporary copy with sanitized filename for NeMo processing...")
-    temp_dir = os.path.join(output_dir, "temp_audio")
+    # Use centralized temp directory to avoid path issues
+    agent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    temp_dir = os.path.join(agent_dir, "output", "temp")
     temp_file_path, _ = create_temp_audio_copy(str(audio_path), temp_dir)
-    audio_path_for_nemo = Path(temp_file_path)
-    using_temp_file = True
-    print(f"✅ Using temporary file for NeMo: {audio_path_for_nemo.name}\n")
     
-    # Create manifest file (use temp file path for NeMo)
-    manifest_path = Path(output_dir) / "manifest.json"
+    audio_path_for_nemo = Path(temp_file_path)
+    
+    print(f"✅ Using temporary file for NeMo: {audio_path_for_nemo}")
+    print(f"🐛 DEBUG: Temp audio file path: {temp_file_path}")
+    print(f"🐛 DEBUG: Temp directory: {temp_dir}\n")
+    
+    # Create manifest file in temp folder to avoid special character issues
+    # NeMo has trouble when the manifest is in a folder with special characters
+    manifest_path = Path(temp_dir) / "manifest.json"
+    # Convert Windows path to forward slashes for better compatibility with NeMo
+    audio_path_str = str(audio_path_for_nemo).replace('\\', '/')
     manifest_entry = {
-        "audio_filepath": str(audio_path_for_nemo),
+        "audio_filepath": audio_path_str,
         "offset": 0,
         "duration": None,  # Will be calculated automatically
         "label": "infer",
@@ -200,11 +247,29 @@ def diarize(audio_filepath: str, output_dir: str, num_speakers: int = 2, domain_
         json.dump(manifest_entry, f)
         f.write('\n')
     
-    print(f"📝 Created manifest file: {manifest_path}\n")
+    print(f"📝 Created manifest file: {manifest_path}")
+    print(f"🐛 DEBUG: Manifest audio_filepath: {audio_path_str}")
+    
+    # Read and print manifest content for debugging
+    with open(manifest_path, 'r') as f:
+        manifest_content = f.read()
+        print(f"🐛 DEBUG: Manifest content:\n{manifest_content}")
+    
+    # Verify temp audio file exists and is readable
+    print(f"🐛 DEBUG: Verifying temp audio file...")
+    print(f"🐛 DEBUG: Temp file exists: {os.path.exists(temp_file_path)}")
+    if os.path.exists(temp_file_path):
+        import wave
+        try:
+            with wave.open(temp_file_path, 'rb') as w:
+                print(f"🐛 DEBUG: Temp file - Channels: {w.getnchannels()}, Framerate: {w.getframerate()}, Frames: {w.getnframes()}, Duration: {w.getnframes() / w.getframerate():.2f}s")
+        except Exception as e:
+            print(f"🐛 DEBUG: Error reading temp file with wave: {e}")
+    print()
     
     try:
         # Setup configuration
-        cfg = setup_config(audio_filepath, output_dir, domain_type, num_speakers)
+        cfg = setup_config(audio_filepath, output_dir, temp_dir, domain_type, num_speakers)
         
         # Initialize the diarization model
         print("🤖 Initializing ClusteringDiarizer model...")
@@ -220,30 +285,76 @@ def diarize(audio_filepath: str, output_dir: str, num_speakers: int = 2, domain_
         print("✅ Diarization complete!")
         print(f"{'='*60}\n")
         
-        # Find any RTTM file generated by NeMo in the pred_rttms directory
-        rttm_dir = Path(output_dir) / "pred_rttms"
-        final_rttm_file = rttm_dir / "diarization.rttm"
+        # Find RTTM file in temp directory (where NeMo wrote it)
+        temp_rttm_dir = Path(temp_dir) / "pred_rttms"
         
-        if not rttm_dir.exists():
-            raise FileNotFoundError(f"❌ RTTM directory not found: {rttm_dir}")
+        if not temp_rttm_dir.exists():
+            raise FileNotFoundError(f"❌ RTTM directory not found: {temp_rttm_dir}")
         
         # Find any .rttm file in the directory
-        rttm_files = list(rttm_dir.glob("*.rttm"))
+        rttm_files = list(temp_rttm_dir.glob("*.rttm"))
         
         if not rttm_files:
-            raise FileNotFoundError(f"❌ No RTTM files found in {rttm_dir}. Check the output directory for results.")
+            raise FileNotFoundError(f"❌ No RTTM files found in {temp_rttm_dir}. Check the temp directory for results.")
         
         # Use the first (and likely only) RTTM file found
         generated_rttm_file = rttm_files[0]
-        print(f"📄 Found generated RTTM file: {generated_rttm_file}")
+        print(f"📄 Found generated RTTM file in temp: {generated_rttm_file}")
         
-        # Rename to standard name to avoid long filename issues
-        if generated_rttm_file != final_rttm_file:
-            shutil.move(str(generated_rttm_file), str(final_rttm_file))
-            print(f"📄 Renamed RTTM file to: {final_rttm_file}")
-        
-        with open(final_rttm_file, 'r') as f:
+        # Read RTTM content
+        with open(generated_rttm_file, 'r') as f:
             rttm_content = f.read()
+        
+        # Copy ALL NeMo outputs from temp to final output directory
+        print(f"\n📦 Copying all NeMo outputs to final location...")
+        
+        # Copy pred_rttms directory
+        output_rttm_dir = Path(output_dir) / "pred_rttms"
+        output_rttm_dir.mkdir(parents=True, exist_ok=True)
+        final_rttm_file = output_rttm_dir / "diarization.rttm"
+        with open(final_rttm_file, 'w') as f:
+            f.write(rttm_content)
+        print(f"  ✅ Copied RTTM to: {final_rttm_file}")
+        
+        # Copy speaker_outputs directory
+        temp_speaker_outputs = Path(temp_dir) / "speaker_outputs"
+        if temp_speaker_outputs.exists():
+            final_speaker_outputs = Path(output_dir) / "speaker_outputs"
+            if final_speaker_outputs.exists():
+                shutil.rmtree(final_speaker_outputs)
+            shutil.copytree(temp_speaker_outputs, final_speaker_outputs)
+            print(f"  ✅ Copied speaker_outputs to: {final_speaker_outputs}")
+        
+        # Copy vad_outputs directory
+        temp_vad_outputs = Path(temp_dir) / "vad_outputs"
+        if temp_vad_outputs.exists():
+            final_vad_outputs = Path(output_dir) / "vad_outputs"
+            if final_vad_outputs.exists():
+                shutil.rmtree(final_vad_outputs)
+            shutil.copytree(temp_vad_outputs, final_vad_outputs)
+            print(f"  ✅ Copied vad_outputs to: {final_vad_outputs}")
+        
+        # Copy manifest files
+        temp_manifest = Path(temp_dir) / "manifest.json"
+        if temp_manifest.exists():
+            final_manifest = Path(output_dir) / "manifest.json"
+            shutil.copy2(temp_manifest, final_manifest)
+            print(f"  ✅ Copied manifest.json to: {final_manifest}")
+        
+        temp_manifest_vad = Path(temp_dir) / "manifest_vad_input.json"
+        if temp_manifest_vad.exists():
+            final_manifest_vad = Path(output_dir) / "manifest_vad_input.json"
+            shutil.copy2(temp_manifest_vad, final_manifest_vad)
+            print(f"  ✅ Copied manifest_vad_input.json to: {final_manifest_vad}")
+        
+        # Copy config file to final output directory for reference
+        temp_config = Path(temp_dir) / f"diar_infer_{domain_type}.yaml"
+        if temp_config.exists():
+            final_config = Path(output_dir) / f"diar_infer_{domain_type}.yaml"
+            shutil.copy2(str(temp_config), str(final_config))
+            print(f"  ✅ Copied config to: {final_config}")
+        
+        print(f"📦 All NeMo outputs copied successfully!\n")
         
         # Print summary
         lines = rttm_content.strip().split('\n')
@@ -256,26 +367,24 @@ def diarize(audio_filepath: str, output_dir: str, num_speakers: int = 2, domain_
         
         print(f"📊 Detected {len(lines)} segments from {len(speakers)} speakers: {', '.join(sorted(speakers))}\n")
         
-        # Clean up temporary file if used
-        if using_temp_file and temp_file_path and os.path.exists(temp_file_path):
+        # Clean up temporary directory after all files have been copied
+        if os.path.exists(temp_dir):
             try:
-                temp_dir = os.path.dirname(temp_file_path)
                 shutil.rmtree(temp_dir)
-                print(f"🧹 Cleaned up temporary audio file\n")
+                print(f"🧹 Cleaned up temporary directory: {temp_dir}\n")
             except Exception as cleanup_error:
-                print(f"⚠️  Could not clean up temporary file: {cleanup_error}\n")
+                print(f"⚠️  Warning: Could not clean up temporary directory: {cleanup_error}\n")
         
-        return rttm_content
+        return str(final_rttm_file)
         
     except Exception as e:
-        # Clean up temporary file if used
-        if using_temp_file and temp_file_path and os.path.exists(temp_file_path):
+        # Clean up temporary directory even if error occurred
+        if 'temp_dir' in locals() and os.path.exists(temp_dir):
             try:
-                temp_dir = os.path.dirname(temp_file_path)
                 shutil.rmtree(temp_dir)
-                print(f"🧹 Cleaned up temporary audio file\n")
+                print(f"🧹 Cleaned up temporary directory after error: {temp_dir}\n")
             except Exception as cleanup_error:
-                print(f"⚠️  Could not clean up temporary file: {cleanup_error}\n")
+                print(f"⚠️  Warning: Could not clean up temporary directory: {cleanup_error}\n")
         
         print(f"\n❌ Error during diarization: {e}")
         print("\n💡 Troubleshooting tips:")
@@ -315,11 +424,8 @@ def diarize_audio(audio_filepath: str, num_speakers: int = 2, domain_type: str =
     
     Returns:
         dict: Dictionary containing:
-            - success: Whether diarization succeeded
-            - rttm_content: Raw RTTM format results
-            - output_dir: Directory with all output files
-            - segments: List of diarization segments with speaker, start time, and duration
-            - error: Error message if failed
+            - audio_filepath: Path to the original audio file that was diarized
+            - rttm_filepath: Path to the RTTM file containing diarization results (or error dict if failed)
     """
     try:
         # Verify audio file exists
@@ -340,32 +446,17 @@ def diarize_audio(audio_filepath: str, num_speakers: int = 2, domain_type: str =
         print(f"📂 Output directory: {output_dir}")
         
         # Perform diarization
-        rttm_content = diarize(
+        rttm_filepath = diarize(
             audio_filepath=audio_filepath,
             output_dir=output_dir,
             num_speakers=num_speakers,
             domain_type=domain_type
         )
         
-        # Parse RTTM content into structured segments
-        segments = []
-        for line in rttm_content.strip().split('\n'):
-            if line.strip():
-                parts = line.split()
-                if len(parts) >= 8:
-                    segments.append({
-                        "speaker": parts[7],
-                        "start_time": float(parts[3]),
-                        "duration": float(parts[4])
-                    })
-        
+        # Return only the file paths - no content to avoid confusing the LLM
         return {
-            "success": True,
-            "rttm_content": rttm_content,
-            "output_dir": output_dir,
-            "segments": segments,
-            "num_segments": len(segments),
-            "speakers": list(set(seg["speaker"] for seg in segments))
+            "audio_filepath": audio_filepath,
+            "rttm_filepath": rttm_filepath
         }
         
     except Exception as e:

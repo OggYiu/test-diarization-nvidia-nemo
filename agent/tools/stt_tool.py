@@ -160,8 +160,9 @@ def transcribe_audio_segments(
     max_single_segment_time: Annotated[int, "Maximum segment time in milliseconds"] = 30000
 ) -> str:
     """
-    Transcribe audio segments using SenseVoiceSmall model.
-    This tool should be used after chop_audio_by_rttm has created speaker segments.
+    Transcribe all audio segments in a directory using SenseVoiceSmall model.
+    This tool reads all audio files (.wav, .mp3, .flac, .m4a, .ogg) from the given directory
+    and transcribes them. Use this after chop_audio_by_rttm has created speaker segments.
     
     Args:
         segments_directory: Path to directory containing chopped audio segments
@@ -170,7 +171,7 @@ def transcribe_audio_segments(
         max_single_segment_time: Maximum segment time in milliseconds (default: 30000)
     
     Returns:
-        str: Summary of transcription results with speaker labels and transcriptions
+        str: Path to the JSON file containing all transcription results
     """
     try:
         # Initialize model if not already loaded
@@ -219,38 +220,20 @@ def transcribe_audio_segments(
         if not results:
             return "❌ Failed to transcribe any audio segments"
         
-        summary = f"\n{'='*80}\n"
-        summary += f"✅ Successfully transcribed {len(results)}/{len(audio_files)} segments\n"
-        summary += f"⏱️ Total processing time: {total_time:.2f}s\n"
-        summary += f"{'='*80}\n\n"
-        
-        summary += "📝 Transcription Results:\n"
-        summary += "=" * 80 + "\n\n"
-        
-        for result in results:
-            # Extract speaker ID from filename (e.g., "speaker_0_segment_001.wav" -> "Speaker 0")
-            filename = result['file']
-            speaker_match = filename.split('_')[1] if 'speaker_' in filename else "Unknown"
-            
-            summary += f"🔊 Speaker {speaker_match}:\n"
-            summary += f"   File: {filename}\n"
-            summary += f"   Text: {result['transcription']}\n"
-            summary += f"   Time: {result['processing_time']:.2f}s\n"
-            summary += "-" * 80 + "\n\n"
-        
-        # Save transcriptions to JSON file in output/transcriptions/
+        # Save transcriptions to JSON file in output/transcriptions/filename/
         # Extract filename from segments_directory path
         segments_folder_name = os.path.basename(os.path.normpath(segments_directory))
         
-        # Create output/transcriptions directory
+        # Create output/transcriptions/filename directory
         output_dir = os.path.join(
             os.path.dirname(os.path.dirname(segments_directory)), 
-            "transcriptions"
+            "transcriptions",
+            segments_folder_name
         )
         os.makedirs(output_dir, exist_ok=True)
         
-        # Create output filename: filename_transcriptions.json
-        output_json_filename = f"{segments_folder_name}_transcriptions.json"
+        # Create output filename: transcriptions.json
+        output_json_filename = "transcriptions.json"
         output_json_path = os.path.join(output_dir, output_json_filename)
         
         with open(output_json_path, 'w', encoding='utf-8') as f:
@@ -262,9 +245,31 @@ def transcribe_audio_segments(
             }
             json.dump(json_data, f, ensure_ascii=False, indent=2)
         
-        summary += f"💾 Transcriptions saved to: {output_json_path}\n"
+        # Also save as simple text format: transcriptions_text.txt
+        output_text_filename = "transcriptions_text.txt"
+        output_text_path = os.path.join(output_dir, output_text_filename)
         
-        return summary
+        with open(output_text_path, 'w', encoding='utf-8') as f:
+            for result in results:
+                # Extract speaker from filename (e.g., segment_001_0220_0270_speaker_0.wav -> speaker_0)
+                filename = result['file']
+                speaker = "unknown"
+                if 'speaker_' in filename:
+                    # Extract speaker_X from filename
+                    speaker_part = filename.split('speaker_')[-1]
+                    speaker_num = speaker_part.split('.')[0].split('_')[0]
+                    speaker = f"speaker_{speaker_num}"
+                
+                # Write in format: speaker_0:transcription text
+                f.write(f"{speaker}:{result['transcription']}\n")
+        
+        print(f"\n✅ Successfully transcribed {len(results)}/{len(audio_files)} segments")
+        print(f"⏱️ Total processing time: {total_time:.2f}s")
+        print(f"💾 Transcriptions saved to: {output_json_path}")
+        print(f"💾 Text format saved to: {output_text_path}\n")
+        
+        # return output_json_path
+        return output_text_path
         
     except Exception as e:
         import traceback
