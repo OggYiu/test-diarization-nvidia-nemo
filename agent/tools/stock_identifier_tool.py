@@ -20,34 +20,48 @@ def analyze_conversation_for_stocks(conversation_text: str) -> dict:
         # Initialize LLM (same configuration as main agent)
         llm = ChatOpenAI(
             api_key="ollama",
-            model="qwen3:8b",
+            model="qwen3:32b",
             base_url="http://localhost:11434/v1",
-            temperature=0.0
+            temperature=1.0
         )
         
         # Create analysis prompt
         analysis_prompt = f"""Analyze the following conversation and identify all stocks that are mentioned.
 For each stock, provide:
-1. Stock name or code (if mentioned)
-2. Stock symbol (if mentioned)
-3. Context (what was said about the stock - e.g., buy, sell, price discussion)
-4. Any quantities or prices mentioned
+1. Stock code
+2. Stock name
+3. Action: MUST be one of "buy", "sell", "hold", "discuss", or "unknown" based on the conversation context
+   - "buy": ONLY if the conversation indicates buying/purchasing the stock AND BOTH price and quantity are explicitly mentioned
+   - "sell": ONLY if the conversation indicates selling/disposing the stock AND BOTH price and quantity are explicitly mentioned
+   - "hold": if the conversation indicates holding/keeping the stock
+   - "discuss": if the stock is just discussed without clear buy/sell intent, or if buy/sell is mentioned but price/quantity is missing
+   - "unknown": if the action cannot be determined
+   
+   IMPORTANT: If you identify a potential "buy" or "sell" action but cannot find BOTH a specific price AND a specific quantity in the conversation, you MUST classify it as "discuss" instead. It is very unlikely to be an actual buy/sell transaction without both price and quantity information.
+
+4. Context (what was said about the stock - e.g., buy, sell, price discussion)
+5. Any quantities or prices mentioned (extract these explicitly if present)
+6. Confidence score (0.0 to 1.0)
+7. Reasoning (why you think the stock was mentioned and what action was indicated, including whether price/quantity were found)
 
 Return your response in JSON format with this structure:
 {{
     "stocks": [
         {{
-            "name": "stock name",
-            "symbol": "stock symbol or code",
+            "stock_code": "stock code",
+            "stock_name": "stock name",
+            "action": "buy|sell|hold|discuss|unknown",
             "context": "what was discussed",
             "quantity": "quantity mentioned (if any)",
-            "price": "price mentioned (if any)"
+            "price": "price mentioned (if any)",
+            "confidence": "confidence score (0.0 to 1.0)",
+            "reasoning": "why you think the stock was mentioned and what action was indicated"
         }}
     ],
     "summary": "brief summary of stock-related discussion"
 }}
 
-If no stocks are mentioned, return an empty stocks array.
+If no stocks are mentioned, return an empty stocks array. PLEASE REPLY IN TRADITIONAL CHINESE.
 
 Conversation:
 {conversation_text}
@@ -73,9 +87,24 @@ Conversation:
                 "summary": response_text
             }
         
+        # Post-process: Validate that buy/sell actions have both price and quantity
+        stocks = analysis_result.get('stocks', [])
+        for stock in stocks:
+            action = stock.get('action', '').lower()
+            if action in ['buy', 'sell']:
+                price = stock.get('price', '').strip()
+                quantity = stock.get('quantity', '').strip()
+                
+                # If either price or quantity is missing, downgrade to "discuss"
+                if not price or not quantity:
+                    stock['action'] = 'discuss'
+                    # Update reasoning to explain why it was downgraded
+                    original_reasoning = stock.get('reasoning', '')
+                    stock['reasoning'] = f"{original_reasoning} [Downgraded from {action} to discuss: missing {'price' if not price else 'quantity'}]"
+        
         return {
             'status': 'success',
-            'stocks': analysis_result.get('stocks', []),
+            'stocks': stocks,
             'summary': analysis_result.get('summary', ''),
             'raw_response': response_text
         }
@@ -101,7 +130,8 @@ def identify_stocks_in_conversation(conversation_text: str) -> str:
     Analyze conversation text using LLM to identify stocks that were discussed.
     
     This tool takes a conversation transcript and uses an LLM to identify:
-    - Stock names and symbols mentioned
+    - Stock codes and names mentioned
+    - Action (buy/sell/hold/discuss/unknown)
     - Context (buy/sell/price discussion)
     - Quantities and prices mentioned
     
@@ -130,8 +160,13 @@ def identify_stocks_in_conversation(conversation_text: str) -> str:
     
     for i, stock in enumerate(stocks, 1):
         output += f"Stock {i}:\n"
-        output += f"  Name: {stock.get('name', 'N/A')}\n"
-        output += f"  Symbol/Code: {stock.get('symbol', 'N/A')}\n"
+        # Try both naming conventions (stock_name/stock_code from LLM, or name/symbol for compatibility)
+        output += f"  Name: {stock.get('stock_name', 'N/A')}\n"
+        output += f"  Code: {stock.get('stock_code', 'N/A')}\n"
+        # Prominently display the action
+        action = stock.get('action', 'unknown')
+        action_display = action.upper() if action in ['buy', 'sell'] else action
+        output += f"  Action: {action_display}\n"
         output += f"  Context: {stock.get('context', 'N/A')}\n"
         if stock.get('quantity'):
             output += f"  Quantity: {stock.get('quantity')}\n"
