@@ -172,7 +172,7 @@ def setup_config(audio_file: str, output_dir: str, temp_dir: str, domain_type: s
     return cfg
 
 
-def diarize(audio_filepath: str, output_dir: str, num_speakers: int = 2, domain_type: str = "telephonic") -> str:
+def diarize(audio_filepath: str, output_dir: str, num_speakers: int = 2, domain_type: str = "telephonic", overwrite: bool = False) -> str:
     """
     Perform speaker diarization on an audio file.
     
@@ -181,6 +181,7 @@ def diarize(audio_filepath: str, output_dir: str, num_speakers: int = 2, domain_
         output_dir: Output directory for diarization results
         num_speakers: Number of speakers (default: 2)
         domain_type: Type of audio domain - 'meeting' or 'telephonic' (default: 'telephonic')
+        overwrite: If True, re-run diarization even if RTTM file exists (default: False)
     
     Returns:
         str: Path to the .rttm file containing diarization results
@@ -189,8 +190,24 @@ def diarize(audio_filepath: str, output_dir: str, num_speakers: int = 2, domain_
         FileNotFoundError: If audio file or RTTM output is not found
         Exception: If diarization fails
     """
-    # Always clean the output directory to ensure fresh results
-    if os.path.exists(output_dir):
+    # Check if RTTM file already exists
+    expected_rttm_file = Path(output_dir) / "pred_rttms" / "diarization.rttm"
+    
+    if not overwrite and expected_rttm_file.exists():
+        # Check if the file is not empty
+        if expected_rttm_file.stat().st_size > 0:
+            print(f"\n{'='*60}")
+            print(f"✅ Found existing RTTM file (not empty)")
+            print(f"{'='*60}")
+            print(f"📄 Using existing RTTM file: {expected_rttm_file}")
+            print(f"💡 To re-run diarization, set overwrite=True")
+            print(f"{'='*60}\n")
+            return str(expected_rttm_file)
+        else:
+            print(f"⚠️  Existing RTTM file is empty, will re-run diarization")
+    
+    # Clean the output directory only if overwrite is True
+    if overwrite and os.path.exists(output_dir):
         shutil.rmtree(output_dir)
         print(f"🧹 Cleaned existing output directory: {output_dir}")
     
@@ -411,7 +428,7 @@ def sanitize_directory_name(name: str) -> str:
 
 
 @tool
-def diarize_audio(audio_filepath: str, num_speakers: int = 2, domain_type: str = "telephonic") -> dict:
+def diarize_audio(audio_filepath: str, num_speakers: int = 2, domain_type: str = "telephonic", overwrite: bool = False) -> dict:
     """Perform speaker diarization on an audio file to identify who spoke when.
     
     This tool processes an audio file and returns speaker diarization results showing
@@ -421,6 +438,7 @@ def diarize_audio(audio_filepath: str, num_speakers: int = 2, domain_type: str =
         audio_filepath: Path to the audio file (WAV, FLAC, or MP3)
         num_speakers: Number of speakers in the audio (default: 2)
         domain_type: Type of audio - "telephonic" for phone calls or "meeting" for meetings (default: "telephonic")
+        overwrite: If True, re-run diarization even if RTTM file already exists (default: False)
     
     Returns:
         dict: Dictionary containing:
@@ -458,7 +476,8 @@ def diarize_audio(audio_filepath: str, num_speakers: int = 2, domain_type: str =
             audio_filepath=audio_filepath,
             output_dir=output_dir,
             num_speakers=num_speakers,
-            domain_type=domain_type
+            domain_type=domain_type,
+            overwrite=overwrite
         )
         
         # Return only the file paths - no content to avoid confusing the LLM
