@@ -224,12 +224,33 @@ def transcribe_audio_segments(
         # Extract filename from segments_directory path
         segments_folder_name = os.path.basename(os.path.normpath(segments_directory))
         
-        # Create output/transcriptions/filename directory
-        output_dir = os.path.join(
-            os.path.dirname(os.path.dirname(segments_directory)), 
-            "transcriptions",
-            segments_folder_name
-        )
+        # Clean up the folder name by removing common suffixes that shouldn't be there
+        # This handles cases where segments_directory has unwanted suffixes like:
+        # - "[filename].wav_segments" -> "[filename]"
+        # - "chopped" -> "chopped" (will be handled as-is for backward compat)
+        # - "chopped_segments" -> "chopped_segments" (will be handled as-is)
+        suffixes_to_remove = ['.wav_segments', '.mp3_segments', '.flac_segments', '.m4a_segments', '.ogg_segments']
+        for suffix in suffixes_to_remove:
+            if segments_folder_name.endswith(suffix):
+                segments_folder_name = segments_folder_name[:-len(suffix)]
+                print(f"🔧 Cleaned folder name suffix: {suffix}")
+                break
+        
+        # Create output/transcriptions/filename directory using absolute path
+        # Get the agent directory (same pattern as diarize_tool and audio_chopper_tool)
+        agent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        
+        # ALWAYS use the agent/output/transcriptions directory structure
+        # This prevents accidentally creating folders in the source directory
+        output_dir = os.path.join(agent_dir, "output", "transcriptions", segments_folder_name)
+        
+        # Validate that output_dir is NOT in the segments directory (source)
+        segments_dir_abs = os.path.abspath(segments_directory)
+        output_dir_abs = os.path.abspath(output_dir)
+        if output_dir_abs.startswith(segments_dir_abs):
+            # This would create output in the segments folder - prevent it!
+            print(f"⚠️  Prevented creating output in segments directory")
+        
         os.makedirs(output_dir, exist_ok=True)
         
         # Create output filename: transcriptions.json

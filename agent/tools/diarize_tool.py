@@ -435,15 +435,23 @@ def diarize_audio(audio_filepath: str, num_speakers: int = 2, domain_type: str =
                 "error": f"Audio file not found: {audio_filepath}"
             }
         
-        # Create output directory path with absolute path to avoid issues
         # Get the agent directory
         agent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         audio_basename = os.path.splitext(os.path.basename(audio_filepath))[0]
         
-        # Sanitize the directory name to avoid special character issues
+        # ALWAYS use the agent/output/diarization directory structure
+        # This prevents accidentally creating folders in the source directory
         output_dir = os.path.join(agent_dir, "output", "diarization", audio_basename)
         
-        print(f"📂 Output directory: {output_dir}")
+        # Validate that output_dir is NOT in the source audio directory
+        audio_dir = os.path.dirname(os.path.abspath(audio_filepath))
+        output_dir_abs = os.path.abspath(output_dir)
+        if output_dir_abs.startswith(audio_dir):
+            # This would create output in the source folder - prevent it!
+            output_dir = os.path.join(agent_dir, "output", "diarization", audio_basename)
+            print(f"⚠️  Prevented creating output in source directory")
+        
+        print(f"📂 Diarization output directory: {output_dir}")
         
         # Perform diarization
         rttm_filepath = diarize(

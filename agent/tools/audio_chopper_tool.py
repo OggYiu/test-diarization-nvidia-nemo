@@ -160,20 +160,19 @@ def chop_audio_file(wav_path, segments, output_folder, padding_ms=100):
 
 
 @tool
-def chop_audio_by_rttm(audio_filepath: str, rttm_content: str = None, rttm_filepath: str = None, 
-                        output_dir: str = None) -> str:
+def chop_audio_by_rttm(audio_filepath: str, rttm_content: str = None, rttm_filepath: str = None) -> str:
     """Chop an audio file into speaker segments based on RTTM diarization data.
     
     This tool splits an audio file into separate segments for each speaker turn based on
     diarization results (RTTM format). Use this after running diarization to get individual
     speaker segments that can be transcribed separately.
     
+    The output will be saved to: agent/output/chopped_segments/[audio_filename]/
+    
     Args:
         audio_filepath: Path to the audio file to chop (WAV, FLAC, or MP3)
         rttm_content: RTTM content as a string (provide either this or rttm_filepath)
         rttm_filepath: Path to RTTM file (provide either this or rttm_content)
-        output_dir: Directory to save chopped segments (default: creates temp directory)
-        padding_ms: Padding in milliseconds to add before/after each segment (default: 100)
     
     Returns:
         str: Path to the directory containing the chopped audio segments
@@ -188,14 +187,21 @@ def chop_audio_by_rttm(audio_filepath: str, rttm_content: str = None, rttm_filep
         if not rttm_content and not rttm_filepath:
             return "❌ Error: Must provide either rttm_content or rttm_filepath"
         
-        # Create output directory if not provided, using consistent structure with absolute path
-        if output_dir is None:
-            # Get the agent directory
-            agent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            audio_basename = os.path.splitext(os.path.basename(audio_filepath))[0]
-            
-            # Sanitize the directory name to avoid special character issues
+        # Get the agent directory
+        agent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        audio_basename = os.path.splitext(os.path.basename(audio_filepath))[0]
+        
+        # ALWAYS use the agent/output/chopped_segments directory structure
+        # This prevents accidentally creating folders in the source directory
+        output_dir = os.path.join(agent_dir, "output", "chopped_segments", audio_basename)
+        
+        # Validate that output_dir is NOT in the source audio directory
+        audio_dir = os.path.dirname(os.path.abspath(audio_filepath))
+        output_dir_abs = os.path.abspath(output_dir)
+        if output_dir_abs.startswith(audio_dir):
+            # This would create output in the source folder - prevent it!
             output_dir = os.path.join(agent_dir, "output", "chopped_segments", audio_basename)
+            print(f"⚠️  Prevented creating output in source directory")
         
         print(f"📂 Chopping output directory: {output_dir}")
         
