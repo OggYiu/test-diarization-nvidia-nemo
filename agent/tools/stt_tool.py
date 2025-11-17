@@ -17,6 +17,12 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 from batch_stt import format_str_v3, load_audio
 
+# Import settings
+agent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if agent_dir not in sys.path:
+    sys.path.insert(0, agent_dir)
+import settings
+
 # Global variables for model management
 sensevoice_model = None
 current_sensevoice_loaded = False
@@ -164,6 +170,9 @@ def transcribe_audio_segments(
     This tool reads all audio files (.wav, .mp3, .flac, .m4a, .ogg) from the given directory
     and transcribes them. Use this after chop_audio_by_rttm has created speaker segments.
     
+    If a transcription file already exists and overwrite=False (from settings), the existing file will be
+    returned without re-processing the audio segments.
+    
     Args:
         segments_directory: Path to directory containing chopped audio segments
         language: Language code for transcription (default: "yue" for Cantonese)
@@ -171,12 +180,11 @@ def transcribe_audio_segments(
         max_single_segment_time: Maximum segment time in milliseconds (default: 30000)
     
     Returns:
-        str: Path to the JSON file containing all transcription results
+        str: Path to the transcriptions_text.txt file containing all transcription results
     """
     try:
-        # Initialize model if not already loaded
-        init_status = initialize_sensevoice_model(vad_model, max_single_segment_time)
-        print(init_status)
+        # Read overwrite setting from settings file
+        overwrite = settings.STT_OVERWRITE
         
         if not os.path.exists(segments_directory):
             return f"❌ Error: Segments directory not found: {segments_directory}"
@@ -193,34 +201,7 @@ def transcribe_audio_segments(
         # Sort files to maintain order
         audio_files.sort()
         
-        print(f"\n{'='*80}")
-        print(f"🎙️ Transcribing {len(audio_files)} audio segments...")
-        print(f"{'='*80}\n")
-        
-        results = []
-        total_time = 0
-        
-        for audio_file in audio_files:
-            print(f"📝 Processing: {os.path.basename(audio_file)}")
-            
-            result = transcribe_single_audio_sensevoice(
-                audio_path=audio_file,
-                language=language,
-            )
-            
-            if result:
-                results.append(result)
-                total_time += result['processing_time']
-                print(f"   ✅ Transcribed in {result['processing_time']:.2f}s")
-                print(f"   📄 Text: {result['transcription'][:100]}...")
-            else:
-                print(f"   ❌ Failed to transcribe")
-        
-        # Format results summary
-        if not results:
-            return "❌ Failed to transcribe any audio segments"
-        
-        # Save transcriptions to JSON file in output/transcriptions/filename/
+        # Determine output directory path BEFORE processing to check for existing files
         # Extract filename from segments_directory path
         segments_folder_name = os.path.basename(os.path.normpath(segments_directory))
         
@@ -257,6 +238,55 @@ def transcribe_audio_segments(
         output_json_filename = "transcriptions.json"
         output_json_path = os.path.join(output_dir, output_json_filename)
         
+        # Also save as simple text format: transcriptions_text.txt
+        output_text_filename = "transcriptions_text.txt"
+        output_text_path = os.path.join(output_dir, output_text_filename)
+        
+        # Check if transcription files already exist BEFORE processing
+        # If file exists and overwrite=False, skip initialization and return early
+        if os.path.exists(output_text_path) and not overwrite:
+            print(f"\n{'='*80}")
+            print(f"✅ Found existing transcription file: {output_text_path}")
+            print(f"📄 Using existing file (overwrite=False)")
+            print(f"{'='*80}\n")
+            return output_text_path
+        
+        # Initialize model only if we need to transcribe (file doesn't exist or overwrite=True)
+        init_status = initialize_sensevoice_model(vad_model, max_single_segment_time)
+        print(init_status)
+        
+        # If overwrite=True or file doesn't exist, proceed with transcription
+        if os.path.exists(output_text_path) and overwrite:
+            print(f"\n⚠️  Existing transcription file found, overwriting (overwrite=True)")
+        
+        print(f"\n{'='*80}")
+        print(f"🎙️ Transcribing {len(audio_files)} audio segments...")
+        print(f"{'='*80}\n")
+        
+        results = []
+        total_time = 0
+        
+        for audio_file in audio_files:
+            print(f"📝 Processing: {os.path.basename(audio_file)}")
+            
+            result = transcribe_single_audio_sensevoice(
+                audio_path=audio_file,
+                language=language,
+            )
+            
+            if result:
+                results.append(result)
+                total_time += result['processing_time']
+                print(f"   ✅ Transcribed in {result['processing_time']:.2f}s")
+                print(f"   📄 Text: {result['transcription'][:100]}...")
+            else:
+                print(f"   ❌ Failed to transcribe")
+        
+        # Format results summary
+        if not results:
+            return "❌ Failed to transcribe any audio segments"
+        
+        # Save transcriptions to JSON file (output paths already determined above)
         with open(output_json_path, 'w', encoding='utf-8') as f:
             json_data = {
                 'total_segments': len(results),
@@ -266,10 +296,7 @@ def transcribe_audio_segments(
             }
             json.dump(json_data, f, ensure_ascii=False, indent=2)
         
-        # Also save as simple text format: transcriptions_text.txt
-        output_text_filename = "transcriptions_text.txt"
-        output_text_path = os.path.join(output_dir, output_text_filename)
-        
+        # Save as simple text format: transcriptions_text.txt
         with open(output_text_path, 'w', encoding='utf-8') as f:
             for result in results:
                 # Extract speaker from filename (e.g., segment_001_0220_0270_speaker_0.wav -> speaker_0)

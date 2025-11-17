@@ -12,6 +12,9 @@ parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
+# Import settings
+import settings
+
 
 def read_rttm_file(rttm_path):
     """
@@ -179,6 +182,9 @@ def chop_audio_by_rttm(audio_filepath: str, rttm_content: str = None, rttm_filep
     """
 
     try:
+        # Read overwrite setting from settings file
+        overwrite = settings.AUDIO_CHOPPER_OVERWRITE
+        
         # Verify audio file exists
         if not os.path.exists(audio_filepath):
             return f"❌ Error: Audio file not found: {audio_filepath}"
@@ -205,10 +211,18 @@ def chop_audio_by_rttm(audio_filepath: str, rttm_content: str = None, rttm_filep
         
         print(f"📂 Chopping output directory: {output_dir}")
         
-        # Always clean the output directory to ensure fresh results
-        if os.path.exists(output_dir):
-            shutil.rmtree(output_dir)
-            print(f"🧹 Cleaned existing output directory: {output_dir}")
+        # Check if files are already chopped
+        if os.path.exists(output_dir) and os.path.isdir(output_dir):
+            # Check if directory has any WAV files
+            existing_files = [f for f in os.listdir(output_dir) if f.endswith('.wav')]
+            if existing_files and not overwrite:
+                print(f"✅ Files already chopped ({len(existing_files)} segments found). Skipping chopping (overwrite=False).")
+                print(f"📂 Existing segments in: {output_dir}\n")
+                return output_dir
+            elif existing_files and overwrite:
+                print(f"⚠️  Overwriting existing {len(existing_files)} segments (overwrite=True)")
+                shutil.rmtree(output_dir)
+                print(f"🧹 Cleaned existing output directory: {output_dir}")
         
         os.makedirs(output_dir, exist_ok=True)
         

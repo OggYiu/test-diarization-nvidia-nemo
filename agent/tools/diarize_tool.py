@@ -16,6 +16,9 @@ parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
+# Import settings
+import settings
+
 
 def has_special_chars(filename: str) -> bool:
     """
@@ -428,7 +431,7 @@ def sanitize_directory_name(name: str) -> str:
 
 
 @tool
-def diarize_audio(audio_filepath: str, num_speakers: int = 2, domain_type: str = "telephonic", overwrite: bool = False) -> dict:
+def diarize_audio(audio_filepath: str, num_speakers: int = 2, domain_type: str = "telephonic") -> dict:
     """Perform speaker diarization on an audio file to identify who spoke when.
     
     This tool processes an audio file and returns speaker diarization results showing
@@ -438,7 +441,6 @@ def diarize_audio(audio_filepath: str, num_speakers: int = 2, domain_type: str =
         audio_filepath: Path to the audio file (WAV, FLAC, or MP3)
         num_speakers: Number of speakers in the audio (default: 2)
         domain_type: Type of audio - "telephonic" for phone calls or "meeting" for meetings (default: "telephonic")
-        overwrite: If True, re-run diarization even if RTTM file already exists (default: False)
     
     Returns:
         dict: Dictionary containing:
@@ -446,6 +448,9 @@ def diarize_audio(audio_filepath: str, num_speakers: int = 2, domain_type: str =
             - rttm_filepath: Path to the RTTM file containing diarization results (or error dict if failed)
     """
     try:
+        # Read overwrite setting from settings file
+        overwrite = settings.DIARIZATION_OVERWRITE
+        
         # Verify audio file exists
         if not os.path.exists(audio_filepath):
             return {

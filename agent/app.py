@@ -145,7 +145,9 @@ SYSTEM_PROMPT = """You are a helpful assistant with access to audio processing t
    - Pass the segments_directory path returned from step 3
    - Returns: string path to the transcription output file
 
-IMPORTANT: Never specify output directories manually. All tools automatically organize outputs into agent/output/ subdirectories.
+IMPORTANT: 
+- Never specify output directories manually. All tools automatically organize outputs into agent/output/ subdirectories.
+- The overwrite behavior for diarize_audio, chop_audio_by_rttm, and transcribe_audio_segments is controlled by settings file (agent/settings.py).
 """
 
 
