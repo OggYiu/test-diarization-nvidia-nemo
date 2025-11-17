@@ -1,0 +1,26 @@
+{
+  "source_file": "test_transcription_test_unverified.txt",
+  "audio_filename": "test_audio_test_unverified",
+  "original_timestamp": "2025-01-20 10:00:00",
+  "verification_timestamp": "2025-11-17 14:30:18",
+  "stocks": [
+    {
+      "stock_name": "不存在的股票",
+      "stock_number": "99999",
+      "price": 1.0,
+      "quantity": 1,
+      "order_type": "bid",
+      "verification": {
+        "verified": false,
+        "corrected": false,
+        "confidence": 0.0,
+        "original_name": "不存在的股票",
+        "original_code": "99999",
+        "verified_name": null,
+        "verified_code": null,
+        "match_type": null,
+        "candidates": []
+      }
+    }
+  ]
+}

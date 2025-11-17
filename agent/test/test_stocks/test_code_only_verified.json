@@ -1,0 +1,26 @@
+{
+  "source_file": "test_transcription_test_code_only.txt",
+  "audio_filename": "test_audio_test_code_only",
+  "original_timestamp": "2025-01-20 10:00:00",
+  "verification_timestamp": "2025-11-17 14:30:16",
+  "stocks": [
+    {
+      "stock_name": "",
+      "stock_number": "00005",
+      "price": 55.0,
+      "quantity": 500,
+      "order_type": "ask",
+      "verification": {
+        "verified": false,
+        "corrected": false,
+        "confidence": 0.0,
+        "original_name": "",
+        "original_code": "00005",
+        "verified_name": null,
+        "verified_code": null,
+        "match_type": null,
+        "candidates": []
+      }
+    }
+  ]
+}

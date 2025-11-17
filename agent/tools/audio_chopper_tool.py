@@ -4,6 +4,7 @@ import tempfile
 import sys
 import shutil
 import re
+import time
 from pydub import AudioSegment
 from pathlib import Path
 
@@ -14,6 +15,9 @@ if parent_dir not in sys.path:
 
 # Import settings
 import settings
+
+# Import path normalization utilities
+from .path_utils import normalize_path_for_llm, normalize_path_from_llm
 
 
 def read_rttm_file(rttm_path):
@@ -27,6 +31,8 @@ def read_rttm_file(rttm_path):
         List of dictionaries containing segment information:
         [{'filename': str, 'speaker': str, 'start': float, 'duration': float, 'end': float}, ...]
     """
+    trace_start = time.time()
+    print(f"[TRACE {time.strftime('%H:%M:%S')}] Reading RTTM file: {os.path.basename(rttm_path)}")
     segments = []
     
     with open(rttm_path, 'r') as f:
@@ -101,6 +107,8 @@ def read_rttm_file(rttm_path):
             segment['end'] = segment['start'] + segment['duration']
             segments.append(segment)
     
+    trace_elapsed = time.time() - trace_start
+    print(f"[TRACE {time.strftime('%H:%M:%S')}] RTTM file read completed in {trace_elapsed:.4f}s - Found {len(segments)} segments")
     return segments
 
 
@@ -126,10 +134,16 @@ def chop_audio_file(wav_path, segments, output_folder, padding_ms=100):
     print(f"📂 Loading audio file: {wav_path}")
     print(f"📊 File size: {os.path.getsize(wav_path) / (1024*1024):.2f} MB")
     
+    trace_start = time.time()
+    print(f"[TRACE {time.strftime('%H:%M:%S')}] Starting audio file loading...")
     try:
         audio = AudioSegment.from_wav(wav_path)
+        trace_elapsed = time.time() - trace_start
+        print(f"[TRACE {time.strftime('%H:%M:%S')}] Audio file loading completed in {trace_elapsed:.2f}s")
         print(f"✅ Audio loaded successfully - Duration: {len(audio)/1000:.2f}s")
     except Exception as e:
+        trace_elapsed = time.time() - trace_start
+        print(f"[TRACE {time.strftime('%H:%M:%S')}] Audio file loading failed after {trace_elapsed:.2f}s: {e}")
         error_msg = f"❌ Failed to load audio file with pydub: {e}"
         print(error_msg)
         raise
@@ -138,6 +152,8 @@ def chop_audio_file(wav_path, segments, output_folder, padding_ms=100):
     base_filename = Path(wav_path).stem
     
     # Process each segment
+    trace_start = time.time()
+    print(f"[TRACE {time.strftime('%H:%M:%S')}] Starting audio chopping for {len(segments)} segments...")
     for i, segment in enumerate(segments, 1):
         start_ms = max(0, segment['start'] * 1000 - padding_ms)
         end_ms = min(len(audio), segment['end'] * 1000 + padding_ms)
@@ -159,6 +175,9 @@ def chop_audio_file(wav_path, segments, output_folder, padding_ms=100):
         print(f"  Saved segment {i}: {output_filename} "
               f"({segment['start']:.2f}s - {segment['end']:.2f}s, "
               f"duration: {duration_sec:.2f}s, speaker: {speaker})")
+    
+    trace_elapsed = time.time() - trace_start
+    print(f"[TRACE {time.strftime('%H:%M:%S')}] Audio chopping completed in {trace_elapsed:.2f}s for {len(segments)} segments")
 
 
 
@@ -182,6 +201,11 @@ def chop_audio_by_rttm(audio_filepath: str, rttm_content: str = None, rttm_filep
     """
 
     try:
+        # Normalize input paths to handle any LLM path manipulation issues
+        audio_filepath = normalize_path_from_llm(audio_filepath)
+        if rttm_filepath:
+            rttm_filepath = normalize_path_from_llm(rttm_filepath)
+        
         # Read overwrite setting from settings file
         overwrite = settings.AUDIO_CHOPPER_OVERWRITE
         
@@ -218,7 +242,8 @@ def chop_audio_by_rttm(audio_filepath: str, rttm_content: str = None, rttm_filep
             if existing_files and not overwrite:
                 print(f"✅ Files already chopped ({len(existing_files)} segments found). Skipping chopping (overwrite=False).")
                 print(f"📂 Existing segments in: {output_dir}\n")
-                return output_dir
+                # Normalize path for LLM consumption (use forward slashes)
+                return normalize_path_for_llm(output_dir)
             elif existing_files and overwrite:
                 print(f"⚠️  Overwriting existing {len(existing_files)} segments (overwrite=True)")
                 shutil.rmtree(output_dir)
@@ -227,6 +252,8 @@ def chop_audio_by_rttm(audio_filepath: str, rttm_content: str = None, rttm_filep
         os.makedirs(output_dir, exist_ok=True)
         
         # Handle RTTM data
+        trace_start = time.time()
+        print(f"[TRACE {time.strftime('%H:%M:%S')}] Processing RTTM data...")
         if rttm_filepath:
             # Read from file
             if not os.path.exists(rttm_filepath):
@@ -246,6 +273,8 @@ def chop_audio_by_rttm(audio_filepath: str, rttm_content: str = None, rttm_filep
                     os.unlink(temp_rttm.name)
                 except:
                     pass
+        trace_elapsed = time.time() - trace_start
+        print(f"[TRACE {time.strftime('%H:%M:%S')}] RTTM data processing completed in {trace_elapsed:.4f}s")
         
         # Verify we have segments
         if not segments:
@@ -259,7 +288,21 @@ def chop_audio_by_rttm(audio_filepath: str, rttm_content: str = None, rttm_filep
         print(f"📊 Created {len(segments)} segments from {len(set(seg['speaker'] for seg in segments))} speakers")
         print(f"📂 Segments saved to: {output_dir}\n")
         
-        return output_dir
+        # Normalize path for LLM consumption (use forward slashes)
+        output_dir_llm = normalize_path_for_llm(output_dir)
+        
+        # Format return message with continuation instruction
+        message = f"\n{'='*80}\n"
+        message += f"✅ Audio Chopping Complete\n"
+        message += f"{'='*80}\n\n"
+        message += f"📂 Output directory: {output_dir_llm}\n"
+        message += f"🔊 Segments created: {len(segments)}\n\n"
+        message += f"{'='*80}\n"
+        message += "✅ Audio chopping complete. Continue with the next step in the pipeline.\n"
+        message += f"   Use segments_directory: {output_dir_llm}\n"
+        message += f"{'='*80}\n"
+        
+        return message
         
     except Exception as e:
         return f"❌ Error during audio chopping: {str(e)}"

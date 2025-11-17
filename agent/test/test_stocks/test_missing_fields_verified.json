@@ -1,0 +1,92 @@
+{
+  "source_file": "test_transcription_test_missing_fields.txt",
+  "audio_filename": "test_audio_test_missing_fields",
+  "original_timestamp": "2025-01-20 10:00:00",
+  "verification_timestamp": "2025-11-17 14:30:19",
+  "stocks": [
+    {
+      "stock_name": "騰訊控股",
+      "stock_number": "00700",
+      "verification": {
+        "verified": true,
+        "corrected": true,
+        "confidence": 0.8753491565585136,
+        "verified_name": "",
+        "verified_code": "700",
+        "match_type": "vector_semantic",
+        "candidates": [
+          {
+            "name": "",
+            "code": "700",
+            "similarity": 0.8753491565585136,
+            "metadata": {
+              "stock_code": "700",
+              "stock_name_en": "TENCENT",
+              "category_c": "股本",
+              "category_en": "Equity",
+              "board_lot": "100",
+              "stock_name_c": "騰訊控股",
+              "pk": 461825172293883274
+            }
+          },
+          {
+            "name": "",
+            "code": "80700",
+            "similarity": 0.7896575629711151,
+            "metadata": {
+              "stock_code": "80700",
+              "stock_name_en": "TENCENT-R",
+              "category_c": "股本",
+              "category_en": "Equity",
+              "board_lot": "100",
+              "stock_name_c": "騰訊控股－Ｒ",
+              "pk": 461825172280050211
+            }
+          },
+          {
+            "name": "",
+            "code": "8",
+            "similarity": 0.7140680551528931,
+            "metadata": {
+              "stock_code": "8",
+              "stock_name_en": "PCCW",
+              "category_c": "股本",
+              "category_en": "Equity",
+              "board_lot": "1000",
+              "stock_name_c": "電訊盈科",
+              "pk": 461825172293882823
+            }
+          },
+          {
+            "name": "",
+            "code": "3088",
+            "similarity": 0.6979344487190247,
+            "metadata": {
+              "stock_code": "3088",
+              "stock_name_en": "CAM HS TECH",
+              "category_c": "交易所買賣產品",
+              "category_en": "Exchange Traded Products",
+              "board_lot": "200",
+              "stock_name_c": "華夏恒生科技",
+              "pk": 461825172280034818
+            }
+          },
+          {
+            "name": "",
+            "code": "248",
+            "similarity": 0.6934962868690491,
+            "metadata": {
+              "stock_code": "248",
+              "stock_name_en": "HKC INT'L HOLD",
+              "category_c": "股本",
+              "category_en": "Equity",
+              "board_lot": "4000",
+              "stock_name_c": "香港通訊國際控股",
+              "pk": 461825172293883028
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

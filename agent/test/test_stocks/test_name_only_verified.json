@@ -1,0 +1,95 @@
+{
+  "source_file": "test_transcription_test_name_only.txt",
+  "audio_filename": "test_audio_test_name_only",
+  "original_timestamp": "2025-01-20 10:00:00",
+  "verification_timestamp": "2025-11-17 14:30:16",
+  "stocks": [
+    {
+      "stock_name": "中國移動",
+      "stock_number": "",
+      "price": 50.0,
+      "quantity": 2000,
+      "order_type": "bid",
+      "verification": {
+        "verified": true,
+        "corrected": true,
+        "confidence": 1.0,
+        "verified_name": "",
+        "verified_code": "941",
+        "match_type": "vector_semantic",
+        "candidates": [
+          {
+            "name": "",
+            "code": "941",
+            "similarity": 1.0,
+            "metadata": {
+              "stock_name_c": "中國移動",
+              "category_c": "股本",
+              "board_lot": "500",
+              "stock_code": "941",
+              "stock_name_en": "CHINA MOBILE",
+              "category_en": "Equity",
+              "pk": 461825172293883454
+            }
+          },
+          {
+            "name": "",
+            "code": "728",
+            "similarity": 0.8997787684202194,
+            "metadata": {
+              "stock_name_c": "中國電信",
+              "category_c": "股本",
+              "board_lot": "2000",
+              "stock_code": "728",
+              "stock_name_en": "CHINA TELECOM",
+              "category_en": "Equity",
+              "pk": 461825172293883298
+            }
+          },
+          {
+            "name": "",
+            "code": "762",
+            "similarity": 0.8973457515239716,
+            "metadata": {
+              "stock_name_c": "中國聯通",
+              "category_c": "股本",
+              "board_lot": "2000",
+              "stock_code": "762",
+              "stock_name_en": "CHINA UNICOM",
+              "category_en": "Equity",
+              "pk": 461825172293883320
+            }
+          },
+          {
+            "name": "",
+            "code": "788",
+            "similarity": 0.8392419517040253,
+            "metadata": {
+              "stock_name_c": "中國鐵塔",
+              "category_c": "股本",
+              "board_lot": "500",
+              "stock_code": "788",
+              "stock_name_en": "CHINA TOWER",
+              "category_en": "Equity",
+              "pk": 461825172293883338
+            }
+          },
+          {
+            "name": "",
+            "code": "552",
+            "similarity": 0.7956016212701797,
+            "metadata": {
+              "stock_name_c": "中國通信服務",
+              "category_c": "股本",
+              "board_lot": "2000",
+              "stock_code": "552",
+              "stock_name_en": "CHINACOMSERVICE",
+              "category_en": "Equity",
+              "pk": 461825172293883160
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

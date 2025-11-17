@@ -1,0 +1,35 @@
+{
+  "source_file": "test_transcription_test_multiple.txt",
+  "audio_filename": "test_audio_test_multiple",
+  "timestamp": "2025-01-20 10:00:00",
+  "stocks": [
+    {
+      "stock_name": "騰訊控股",
+      "stock_number": "00700",
+      "price": 350.0,
+      "quantity": 1000,
+      "order_type": "bid"
+    },
+    {
+      "stock_name": "快手",
+      "stock_number": "01680",
+      "price": 89.5,
+      "quantity": 400,
+      "order_type": "bid"
+    },
+    {
+      "stock_name": "阿里巴巴",
+      "stock_number": "09988",
+      "price": 100.0,
+      "quantity": 500,
+      "order_type": "ask"
+    },
+    {
+      "stock_name": "未知股票",
+      "stock_number": "99999",
+      "price": 10.0,
+      "quantity": 100,
+      "order_type": "bid"
+    }
+  ]
+}

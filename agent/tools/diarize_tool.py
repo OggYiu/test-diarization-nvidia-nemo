@@ -4,7 +4,7 @@ import sys
 import shutil
 import json
 import re
-import tempfile
+import time
 from pathlib import Path
 from omegaconf import OmegaConf
 from nemo.collections.asr.models import ClusteringDiarizer
@@ -18,6 +18,9 @@ if parent_dir not in sys.path:
 
 # Import settings
 import settings
+
+# Import path normalization utilities
+from .path_utils import normalize_path_for_llm, normalize_path_from_llm
 
 
 def has_special_chars(filename: str) -> bool:
@@ -70,14 +73,19 @@ def create_temp_audio_copy(audio_filepath: str, temp_dir: str) -> tuple[str, str
     extension = original_path.suffix
     
     # Create a sanitized filename using timestamp
-    import time
     sanitized_name = f"temp_audio_{int(time.time() * 1000)}{extension}"
     temp_filepath = os.path.join(temp_dir, sanitized_name)
     
     # Copy the file
+    trace_start = time.time()
+    print(f"[TRACE {time.strftime('%H:%M:%S')}] Starting file copy: {os.path.basename(audio_filepath)} -> {sanitized_name}")
     try:
         shutil.copy2(audio_filepath, temp_filepath)
+        trace_elapsed = time.time() - trace_start
+        print(f"[TRACE {time.strftime('%H:%M:%S')}] File copy completed in {trace_elapsed:.2f}s")
     except Exception as e:
+        trace_elapsed = time.time() - trace_start
+        print(f"[TRACE {time.strftime('%H:%M:%S')}] File copy failed after {trace_elapsed:.2f}s: {e}")
         raise IOError(f"Failed to copy audio file: {e}")
     
     # Verify the temp file was created
@@ -123,10 +131,16 @@ def download_config(output_dir: str, domain_type: str = "telephonic") -> str:
     if not os.path.exists(config_path):
         config_url = f"https://raw.githubusercontent.com/NVIDIA/NeMo/main/examples/speaker_tasks/diarization/conf/inference/{config_file_name}"
         print(f"📥 Downloading configuration from: {config_url}")
+        trace_start = time.time()
+        print(f"[TRACE {time.strftime('%H:%M:%S')}] Starting config download...")
         try:
             urllib.request.urlretrieve(config_url, config_path)
+            trace_elapsed = time.time() - trace_start
+            print(f"[TRACE {time.strftime('%H:%M:%S')}] Config download completed in {trace_elapsed:.2f}s")
             print(f"✅ Configuration downloaded to: {config_path}")
         except Exception as e:
+            trace_elapsed = time.time() - trace_start
+            print(f"[TRACE {time.strftime('%H:%M:%S')}] Config download failed after {trace_elapsed:.2f}s: {e}")
             print(f"❌ Error downloading config: {e}")
             raise
     else:
@@ -289,17 +303,32 @@ def diarize(audio_filepath: str, output_dir: str, num_speakers: int = 2, domain_
     
     try:
         # Setup configuration
+        trace_start = time.time()
+        print(f"[TRACE {time.strftime('%H:%M:%S')}] Starting config setup...")
         cfg = setup_config(audio_filepath, output_dir, temp_dir, domain_type, num_speakers)
+        trace_elapsed = time.time() - trace_start
+        print(f"[TRACE {time.strftime('%H:%M:%S')}] Config setup completed in {trace_elapsed:.2f}s")
         
         # Initialize the diarization model
         print("🤖 Initializing ClusteringDiarizer model...")
         print("⬇️  Downloading pretrained models (this may take a while on first run)...\n")
+        trace_start = time.time()
+        print(f"[TRACE {time.strftime('%H:%M:%S')}] Starting ClusteringDiarizer initialization (this may take a while)...")
         
         diarizer = ClusteringDiarizer(cfg=cfg)
         
+        trace_elapsed = time.time() - trace_start
+        print(f"[TRACE {time.strftime('%H:%M:%S')}] ClusteringDiarizer initialization completed in {trace_elapsed:.2f}s ({trace_elapsed/60:.2f} minutes)")
+        
         # Run diarization
         print("🔄 Performing diarization...\n")
+        trace_start = time.time()
+        print(f"[TRACE {time.strftime('%H:%M:%S')}] Starting diarization process (this is typically the slowest step)...")
+        
         diarizer.diarize()
+        
+        trace_elapsed = time.time() - trace_start
+        print(f"[TRACE {time.strftime('%H:%M:%S')}] Diarization process completed in {trace_elapsed:.2f}s ({trace_elapsed/60:.2f} minutes)")
         
         print(f"\n{'='*60}")
         print("✅ Diarization complete!")
@@ -327,6 +356,8 @@ def diarize(audio_filepath: str, output_dir: str, num_speakers: int = 2, domain_
         
         # Copy ALL NeMo outputs from temp to final output directory
         print(f"\n📦 Copying all NeMo outputs to final location...")
+        trace_start = time.time()
+        print(f"[TRACE {time.strftime('%H:%M:%S')}] Starting file copy operations...")
         
         # Copy pred_rttms directory
         output_rttm_dir = Path(output_dir) / "pred_rttms"
@@ -339,20 +370,24 @@ def diarize(audio_filepath: str, output_dir: str, num_speakers: int = 2, domain_
         # Copy speaker_outputs directory
         temp_speaker_outputs = Path(temp_dir) / "speaker_outputs"
         if temp_speaker_outputs.exists():
+            copy_start = time.time()
             final_speaker_outputs = Path(output_dir) / "speaker_outputs"
             if final_speaker_outputs.exists():
                 shutil.rmtree(final_speaker_outputs)
             shutil.copytree(temp_speaker_outputs, final_speaker_outputs)
-            print(f"  ✅ Copied speaker_outputs to: {final_speaker_outputs}")
+            copy_elapsed = time.time() - copy_start
+            print(f"  ✅ Copied speaker_outputs to: {final_speaker_outputs} (took {copy_elapsed:.2f}s)")
         
         # Copy vad_outputs directory
         temp_vad_outputs = Path(temp_dir) / "vad_outputs"
         if temp_vad_outputs.exists():
+            copy_start = time.time()
             final_vad_outputs = Path(output_dir) / "vad_outputs"
             if final_vad_outputs.exists():
                 shutil.rmtree(final_vad_outputs)
             shutil.copytree(temp_vad_outputs, final_vad_outputs)
-            print(f"  ✅ Copied vad_outputs to: {final_vad_outputs}")
+            copy_elapsed = time.time() - copy_start
+            print(f"  ✅ Copied vad_outputs to: {final_vad_outputs} (took {copy_elapsed:.2f}s)")
         
         # Copy manifest files
         temp_manifest = Path(temp_dir) / "manifest.json"
@@ -374,6 +409,8 @@ def diarize(audio_filepath: str, output_dir: str, num_speakers: int = 2, domain_
             shutil.copy2(str(temp_config), str(final_config))
             print(f"  ✅ Copied config to: {final_config}")
         
+        trace_elapsed = time.time() - trace_start
+        print(f"[TRACE {time.strftime('%H:%M:%S')}] All file copy operations completed in {trace_elapsed:.2f}s")
         print(f"📦 All NeMo outputs copied successfully!\n")
         
         # Print summary
@@ -435,7 +472,7 @@ def diarize_audio(audio_filepath: str, num_speakers: int = 2, domain_type: str =
     """Perform speaker diarization on an audio file to identify who spoke when.
     
     This tool processes an audio file and returns speaker diarization results showing
-    when each speaker was talking. This is the first step for audio analysis workflows.
+    when each speaker was talking.
 
     Args:
         audio_filepath: Path to the audio file (WAV, FLAC, or MP3)
@@ -448,6 +485,9 @@ def diarize_audio(audio_filepath: str, num_speakers: int = 2, domain_type: str =
             - rttm_filepath: Path to the RTTM file containing diarization results (or error dict if failed)
     """
     try:
+        # Normalize input path to handle any LLM path manipulation issues
+        audio_filepath = normalize_path_from_llm(audio_filepath)
+        
         # Read overwrite setting from settings file
         overwrite = settings.DIARIZATION_OVERWRITE
         
@@ -486,10 +526,23 @@ def diarize_audio(audio_filepath: str, num_speakers: int = 2, domain_type: str =
         )
         
         # Return only the file paths - no content to avoid confusing the LLM
-        return {
-            "audio_filepath": audio_filepath,
-            "rttm_filepath": rttm_filepath
-        }
+        # Normalize paths for LLM consumption (use forward slashes)
+        audio_path_llm = normalize_path_for_llm(audio_filepath)
+        rttm_path_llm = normalize_path_for_llm(rttm_filepath)
+        
+        # Format as a clear message with continuation instruction
+        message = f"\n{'='*80}\n"
+        message += f"✅ Diarization Complete\n"
+        message += f"{'='*80}\n\n"
+        message += f"📁 Audio file: {audio_path_llm}\n"
+        message += f"📄 RTTM file: {rttm_path_llm}\n\n"
+        message += f"{'='*80}\n"
+        message += "✅ Speaker diarization complete. Continue with the next step in the pipeline.\n"
+        message += f"   Use audio_filepath: {audio_path_llm}\n"
+        message += f"   Use rttm_filepath: {rttm_path_llm}\n"
+        message += f"{'='*80}\n"
+        
+        return message
         
     except Exception as e:
         return {

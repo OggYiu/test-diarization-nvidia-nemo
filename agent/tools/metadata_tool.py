@@ -2,6 +2,8 @@ from langchain.tools import tool
 import os
 import re
 import csv
+import json
+import time
 from datetime import datetime, timedelta
 from typing import Dict
 
@@ -91,6 +93,8 @@ Please ensure special characters are preserved or manually enter the correct for
         client_name = "Not found"
         client_id = "Not found"
         if os.path.exists(csv_path):
+            trace_start = time.time()
+            print(f"[TRACE {time.strftime('%H:%M:%S')}] Reading CSV file for client lookup: {os.path.basename(csv_path)}")
             try:
                 with open(csv_path, 'r', encoding='utf-8') as csvfile:
                     csv_reader = csv.DictReader(csvfile)
@@ -117,7 +121,11 @@ Please ensure special characters are preserved or manually enter the correct for
                         # If we found the client, exit the loop
                         if client_name != "Not found":
                             break
+                trace_elapsed = time.time() - trace_start
+                print(f"[TRACE {time.strftime('%H:%M:%S')}] CSV lookup completed in {trace_elapsed:.4f}s")
             except Exception as e:
+                trace_elapsed = time.time() - trace_start
+                print(f"[TRACE {time.strftime('%H:%M:%S')}] CSV lookup failed after {trace_elapsed:.4f}s: {e}")
                 client_name = f"Error reading CSV: {str(e)}"
                 client_id = "Error reading CSV"
         else:
@@ -166,32 +174,39 @@ HKT: {hkt_formatted}
 
 
 @tool
-def extract_metadata_from_filename(audio_file_path: str) -> str:
+def identify_speakers_from_filename(audio_file_path: str) -> str:
     """
-    Extract metadata from audio filename including broker name, client information, and timestamps.
+    Identify speakers (broker and client) and extract metadata from audio filename.
+    
+    CRITICAL: Use this tool FIRST before diarizing audio files. This tool identifies who the speakers are:
+    - The broker (one speaker in the conversation)
+    - The client (the other speaker in the conversation)
+    
+    When diarization identifies "speaker 0" and "speaker 1", this tool's output tells you which one is the broker and which is the client.
     
     This tool parses audio filenames in the format:
     [Broker Name ID]_8330-97501167_20251010014510(20981).wav
     
     It extracts:
-    - Broker name and ID
-    - Client phone number
-    - Client name and ID (from CSV lookup)
+    - Broker name and ID (one of the speakers)
+    - Client phone number, name, and ID (the other speaker)
     - UTC and HKT timestamps
+    
+    The extracted metadata is saved to agent/output/metadata/ as a JSON file for later reference.
     
     Args:
         audio_file_path: Path to the audio file (filename will be extracted from path)
         
     Returns:
-        A formatted string with the extracted metadata, or an error message if parsing fails
+        A formatted string with the extracted metadata including broker and client information, or an error message if parsing fails
     """
     # Extract just the filename from the full path
     filename = os.path.basename(audio_file_path)
     
-    # Determine the CSV path - look in parent directory if running from agent/
+    # Determine the CSV path - look in agent/assets/
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    parent_dir = os.path.dirname(os.path.dirname(current_dir))
-    csv_path = os.path.join(parent_dir, "client.csv")
+    agent_dir = os.path.dirname(current_dir)  # agent/
+    csv_path = os.path.join(agent_dir, "assets", "client.csv")
     
     # Fallback to current directory if not found in parent
     if not os.path.exists(csv_path):
@@ -199,6 +214,38 @@ def extract_metadata_from_filename(audio_file_path: str) -> str:
     
     # Parse the metadata
     result = parse_filename_metadata(filename, csv_path)
+    
+    # Save metadata to output/metadata/ if parsing was successful
+    if result['status'] == 'success' and result['data']:
+        try:
+            # Determine the output directory - use agent/output/metadata/
+            # current_dir is agent/tools/, so agent_dir is agent/
+            agent_dir = os.path.dirname(current_dir)
+            metadata_output_dir = os.path.join(agent_dir, "output", "metadata")
+            
+            # Create directory if it doesn't exist
+            os.makedirs(metadata_output_dir, exist_ok=True)
+            
+            # Create JSON filename based on audio filename (replace extension with .json)
+            audio_basename = os.path.splitext(filename)[0]
+            json_filename = f"{audio_basename}.json"
+            json_filepath = os.path.join(metadata_output_dir, json_filename)
+            
+            # Save metadata as JSON
+            with open(json_filepath, 'w', encoding='utf-8') as f:
+                json.dump(result['data'], f, indent=2, ensure_ascii=False)
+            
+            # Update formatted output to include save confirmation
+            result['formatted_output'] += f"\n💾 Metadata saved to: {json_filepath}"
+        except Exception as e:
+            # If saving fails, log but don't fail the tool
+            error_msg = f"\n⚠️  Warning: Could not save metadata to file: {str(e)}"
+            result['formatted_output'] += error_msg
+    
+    # Add explicit instruction to continue to next step in pipeline
+    result['formatted_output'] += f"\n\n{'='*80}\n"
+    result['formatted_output'] += "✅ Metadata extraction complete. Continue with the next step in the pipeline.\n"
+    result['formatted_output'] += f"{'='*80}\n"
     
     # Return the formatted output
     return result['formatted_output']

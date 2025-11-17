@@ -1,0 +1,14 @@
+{
+  "source_file": "test_transcription_test_fuzzy_name.txt",
+  "audio_filename": "test_audio_test_fuzzy_name",
+  "timestamp": "2025-01-20 10:00:00",
+  "stocks": [
+    {
+      "stock_name": "騰訊控",
+      "stock_number": "00700",
+      "price": 350.0,
+      "quantity": 1000,
+      "order_type": "bid"
+    }
+  ]
+}

@@ -23,6 +23,9 @@ if agent_dir not in sys.path:
     sys.path.insert(0, agent_dir)
 import settings
 
+# Import path normalization utilities
+from .path_utils import normalize_path_for_llm, normalize_path_from_llm
+
 # Global variables for model management
 sensevoice_model = None
 current_sensevoice_loaded = False
@@ -67,6 +70,7 @@ def initialize_sensevoice_model(vad_model="fsmn-vad", max_single_segment_time=30
     
     # Only reload if not already loaded
     if current_sensevoice_loaded and sensevoice_model is not None:
+        print(f"[TRACE {time.strftime('%H:%M:%S')}] SenseVoiceSmall already loaded, skipping initialization")
         return f"✅ SenseVoiceSmall already loaded"
     
     status = f"🔄 Loading SenseVoiceSmall model...\n"
@@ -81,6 +85,9 @@ def initialize_sensevoice_model(vad_model="fsmn-vad", max_single_segment_time=30
         print(f"Using VAD model: {vad_model}")
         print(f"Using max segment time: {max_single_segment_time}ms")
         
+        trace_start = time.time()
+        print(f"[TRACE {time.strftime('%H:%M:%S')}] Starting SenseVoiceSmall model initialization (this may take a while)...")
+        
         sensevoice_model = AutoModel(
             model="iic/SenseVoiceSmall",
             vad_model=vad_model,
@@ -90,10 +97,16 @@ def initialize_sensevoice_model(vad_model="fsmn-vad", max_single_segment_time=30
             ban_emo_unk=True,
             device=device_str
         )
+        
+        trace_elapsed = time.time() - trace_start
+        print(f"[TRACE {time.strftime('%H:%M:%S')}] SenseVoiceSmall model initialization completed in {trace_elapsed:.2f}s ({trace_elapsed/60:.2f} minutes)")
+        
         current_sensevoice_loaded = True
         status += f"✅ SenseVoiceSmall loaded successfully on {DEVICE_NAME}!"
         return status
     except Exception as e:
+        trace_elapsed = time.time() - trace_start if 'trace_start' in locals() else 0
+        print(f"[TRACE {time.strftime('%H:%M:%S')}] SenseVoiceSmall model initialization failed after {trace_elapsed:.2f}s: {str(e)}")
         status += f"❌ Failed to load SenseVoiceSmall: {str(e)}"
         return status
 
@@ -117,13 +130,21 @@ def transcribe_single_audio_sensevoice(audio_path, language="yue"):
     filename = os.path.basename(audio_path)
     
     # Load audio
+    trace_start = time.time()
+    print(f"[TRACE {time.strftime('%H:%M:%S')}] Loading audio file: {filename}")
     audio_array, sample_rate = load_audio(audio_path)
     if audio_array is None:
+        trace_elapsed = time.time() - trace_start
+        print(f"[TRACE {time.strftime('%H:%M:%S')}] Audio loading failed after {trace_elapsed:.2f}s")
         return None
+    
+    trace_elapsed = time.time() - trace_start
+    print(f"[TRACE {time.strftime('%H:%M:%S')}] Audio loading completed in {trace_elapsed:.2f}s")
     
     # Run inference
     try:
         start_time = time.time()
+        print(f"[TRACE {time.strftime('%H:%M:%S')}] Starting transcription inference for: {filename}")
         
         # Prepare generate parameters
         generate_params = {
@@ -138,13 +159,18 @@ def transcribe_single_audio_sensevoice(audio_path, language="yue"):
         result = sensevoice_model.generate(**generate_params)
         end_time = time.time()
         processing_time = end_time - start_time
+        print(f"[TRACE {time.strftime('%H:%M:%S')}] Transcription inference completed in {processing_time:.2f}s for: {filename}")
         
         # Extract and format text
+        trace_start = time.time()
+        print(f"[TRACE {time.strftime('%H:%M:%S')}] Post-processing transcription for: {filename}")
         raw_text = result[0]["text"]
         formatted_text = format_str_v3(raw_text)
         
         # Convert to Traditional Chinese using OpenCC
         formatted_text = opencc_converter.convert(formatted_text)
+        trace_elapsed = time.time() - trace_start
+        print(f"[TRACE {time.strftime('%H:%M:%S')}] Post-processing completed in {trace_elapsed:.4f}s")
         
         return {
             "file": filename,
@@ -183,6 +209,9 @@ def transcribe_audio_segments(
         str: Path to the transcriptions_text.txt file containing all transcription results
     """
     try:
+        # Normalize the input path to handle any LLM path manipulation issues
+        segments_directory = normalize_path_from_llm(segments_directory)
+        
         # Read overwrite setting from settings file
         overwrite = settings.STT_OVERWRITE
         
@@ -249,7 +278,8 @@ def transcribe_audio_segments(
             print(f"✅ Found existing transcription file: {output_text_path}")
             print(f"📄 Using existing file (overwrite=False)")
             print(f"{'='*80}\n")
-            return output_text_path
+            # Normalize path for LLM consumption (use forward slashes)
+            return normalize_path_for_llm(output_text_path)
         
         # Initialize model only if we need to transcribe (file doesn't exist or overwrite=True)
         init_status = initialize_sensevoice_model(vad_model, max_single_segment_time)
@@ -266,27 +296,37 @@ def transcribe_audio_segments(
         results = []
         total_time = 0
         
-        for audio_file in audio_files:
-            print(f"📝 Processing: {os.path.basename(audio_file)}")
+        transcription_start = time.time()
+        print(f"[TRACE {time.strftime('%H:%M:%S')}] Starting batch transcription of {len(audio_files)} segments...")
+        
+        for idx, audio_file in enumerate(audio_files, 1):
+            print(f"📝 Processing segment {idx}/{len(audio_files)}: {os.path.basename(audio_file)}")
+            segment_start = time.time()
             
             result = transcribe_single_audio_sensevoice(
                 audio_path=audio_file,
                 language=language,
             )
             
+            segment_elapsed = time.time() - segment_start
             if result:
                 results.append(result)
                 total_time += result['processing_time']
-                print(f"   ✅ Transcribed in {result['processing_time']:.2f}s")
+                print(f"   ✅ Transcribed in {result['processing_time']:.2f}s (total segment time: {segment_elapsed:.2f}s)")
                 print(f"   📄 Text: {result['transcription'][:100]}...")
             else:
-                print(f"   ❌ Failed to transcribe")
+                print(f"   ❌ Failed to transcribe (segment time: {segment_elapsed:.2f}s)")
+        
+        transcription_elapsed = time.time() - transcription_start
+        print(f"[TRACE {time.strftime('%H:%M:%S')}] Batch transcription completed in {transcription_elapsed:.2f}s ({transcription_elapsed/60:.2f} minutes)")
         
         # Format results summary
         if not results:
             return "❌ Failed to transcribe any audio segments"
         
         # Save transcriptions to JSON file (output paths already determined above)
+        trace_start = time.time()
+        print(f"[TRACE {time.strftime('%H:%M:%S')}] Saving transcriptions to JSON file...")
         with open(output_json_path, 'w', encoding='utf-8') as f:
             json_data = {
                 'total_segments': len(results),
@@ -295,8 +335,12 @@ def transcribe_audio_segments(
                 'transcriptions': results
             }
             json.dump(json_data, f, ensure_ascii=False, indent=2)
+        trace_elapsed = time.time() - trace_start
+        print(f"[TRACE {time.strftime('%H:%M:%S')}] JSON file save completed in {trace_elapsed:.4f}s")
         
         # Save as simple text format: transcriptions_text.txt
+        trace_start = time.time()
+        print(f"[TRACE {time.strftime('%H:%M:%S')}] Saving transcriptions to text file...")
         with open(output_text_path, 'w', encoding='utf-8') as f:
             for result in results:
                 # Extract speaker from filename (e.g., segment_001_0220_0270_speaker_0.wav -> speaker_0)
@@ -310,14 +354,30 @@ def transcribe_audio_segments(
                 
                 # Write in format: speaker_0:transcription text
                 f.write(f"{speaker}:{result['transcription']}\n")
+        trace_elapsed = time.time() - trace_start
+        print(f"[TRACE {time.strftime('%H:%M:%S')}] Text file save completed in {trace_elapsed:.4f}s")
         
         print(f"\n✅ Successfully transcribed {len(results)}/{len(audio_files)} segments")
         print(f"⏱️ Total processing time: {total_time:.2f}s")
         print(f"💾 Transcriptions saved to: {output_json_path}")
         print(f"💾 Text format saved to: {output_text_path}\n")
         
-        # return output_json_path
-        return output_text_path
+        # Normalize path for LLM consumption (use forward slashes)
+        output_text_path_llm = normalize_path_for_llm(output_text_path)
+        
+        # Format return message with continuation instruction
+        message = f"\n{'='*80}\n"
+        message += f"✅ Transcription Complete\n"
+        message += f"{'='*80}\n\n"
+        message += f"📊 Transcribed segments: {len(results)}/{len(audio_files)}\n"
+        message += f"⏱️  Processing time: {total_time:.2f}s\n"
+        message += f"💾 Text file: {output_text_path_llm}\n\n"
+        message += f"{'='*80}\n"
+        message += "✅ Transcription complete. Continue with the next step in the pipeline.\n"
+        message += f"   Use transcriptions_text_path: {output_text_path_llm}\n"
+        message += f"{'='*80}\n"
+        
+        return message
         
     except Exception as e:
         import traceback

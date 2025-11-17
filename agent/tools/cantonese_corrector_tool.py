@@ -6,6 +6,7 @@ Applies text corrections to transcriptions using the CantoneseCorrector class
 import os
 import sys
 import json
+import time
 from typing import Annotated
 from langchain.tools import tool
 from pathlib import Path
@@ -13,6 +14,9 @@ from pathlib import Path
 # Add parent directory to path to import CantoneseCorrector
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 from agent.cantonese_corrector import CantoneseCorrector
+
+# Import path normalization utilities
+from .path_utils import normalize_path_for_llm, normalize_path_from_llm
 
 # Global corrector instance
 corrector = None
@@ -23,13 +27,18 @@ def initialize_corrector():
     global corrector
     
     if corrector is not None:
+        print(f"[TRACE {time.strftime('%H:%M:%S')}] Cantonese corrector already initialized, skipping")
         return corrector
     
     # Find the corrections file
     agent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     corrections_file = os.path.join(agent_dir, "cantonese_corrections.json")
     
+    trace_start = time.time()
+    print(f"[TRACE {time.strftime('%H:%M:%S')}] Initializing Cantonese corrector...")
     corrector = CantoneseCorrector(corrections_file=corrections_file)
+    trace_elapsed = time.time() - trace_start
+    print(f"[TRACE {time.strftime('%H:%M:%S')}] Cantonese corrector initialization completed in {trace_elapsed:.4f}s")
     print(f"✅ Cantonese corrector initialized with {len(corrector.corrections)} correction rules")
     
     return corrector
@@ -62,6 +71,9 @@ def correct_transcriptions(
         str: Summary of corrections applied with before/after examples
     """
     try:
+        # Normalize the input path to handle any LLM path manipulation issues
+        transcriptions_text_path = normalize_path_from_llm(transcriptions_text_path)
+        
         # Initialize corrector
         corrector_instance = initialize_corrector()
         
@@ -70,8 +82,12 @@ def correct_transcriptions(
             return f"❌ Error: Transcriptions file not found: {transcriptions_text_path}"
         
         # Read transcriptions text file
+        trace_start = time.time()
+        print(f"[TRACE {time.strftime('%H:%M:%S')}] Reading transcriptions file...")
         with open(transcriptions_text_path, 'r', encoding='utf-8') as f:
             lines = f.readlines()
+        trace_elapsed = time.time() - trace_start
+        print(f"[TRACE {time.strftime('%H:%M:%S')}] Transcriptions file read completed in {trace_elapsed:.4f}s - {len(lines)} lines")
         
         print(f"\n{'='*80}")
         print(f"🔧 Correcting {len(lines)} transcription lines...")
@@ -84,8 +100,12 @@ def correct_transcriptions(
         if not os.path.exists(corrections_file):
             return f"❌ Error: Corrections file not found: {corrections_file}"
         
+        trace_start = time.time()
+        print(f"[TRACE {time.strftime('%H:%M:%S')}] Loading correction rules from JSON...")
         with open(corrections_file, 'r', encoding='utf-8') as f:
             corrections_data = json.load(f)
+        trace_elapsed = time.time() - trace_start
+        print(f"[TRACE {time.strftime('%H:%M:%S')}] Correction rules loaded in {trace_elapsed:.4f}s")
         
         # Convert format from {"correct": ["wrong1", "wrong2"]} to 
         # [{"wrong_words": ["wrong1", "wrong2"], "correct_word": "correct"}]
@@ -103,6 +123,8 @@ def correct_transcriptions(
         corrected_lines = []
         corrections_summary = []
         
+        correction_start = time.time()
+        print(f"[TRACE {time.strftime('%H:%M:%S')}] Starting text correction for {len(lines)} lines...")
         for i, line in enumerate(lines):
             line = line.strip()
             if not line or ':' not in line:
@@ -146,17 +168,27 @@ def correct_transcriptions(
             else:
                 print(f"   ℹ️  No changes needed")
         
+        correction_elapsed = time.time() - correction_start
+        print(f"[TRACE {time.strftime('%H:%M:%S')}] Text correction completed in {correction_elapsed:.2f}s")
+        
         # Save corrected transcriptions to new file
+        trace_start = time.time()
+        print(f"[TRACE {time.strftime('%H:%M:%S')}] Saving corrected transcriptions to file...")
         output_path = transcriptions_text_path.replace('.txt', '_corrected.txt')
         with open(output_path, 'w', encoding='utf-8') as f:
             for line in corrected_lines:
                 f.write(line + '\n')
+        trace_elapsed = time.time() - trace_start
+        print(f"[TRACE {time.strftime('%H:%M:%S')}] File save completed in {trace_elapsed:.4f}s")
+        
+        # Normalize output path for LLM consumption (use forward slashes)
+        output_path_for_llm = normalize_path_for_llm(output_path)
         
         # Format summary
         summary = f"\n{'='*80}\n"
         summary += f"✅ Corrected {len(lines)} transcription lines\n"
         summary += f"📝 Applied corrections to {len(corrections_summary)} lines\n"
-        summary += f"💾 Saved corrected transcriptions to: {output_path}\n"
+        summary += f"💾 Saved corrected transcriptions to: {output_path_for_llm}\n"
         summary += f"{'='*80}\n\n"
         
         if corrections_summary:
@@ -169,6 +201,12 @@ def correct_transcriptions(
                 summary += f"   Before: {example['original']}\n"
                 summary += f"   After:  {example['corrected']}\n"
                 summary += "-" * 80 + "\n\n"
+        
+        # Add explicit instruction to continue to next step
+        summary += f"\n{'='*80}\n"
+        summary += "✅ Text correction complete. Continue with the next step in the pipeline.\n"
+        summary += f"   Use corrected file: {output_path_for_llm}\n"
+        summary += f"{'='*80}\n"
         
         return summary
         

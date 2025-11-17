@@ -1,14 +1,32 @@
 import os
+import time
+import warnings
+import logging
+
+# Suppress harmless warnings from NeMo, PyTorch, and OneLogger
+warnings.filterwarnings('ignore', category=UserWarning)
+warnings.filterwarnings('ignore', message='.*Megatron num_microbatches_calculator.*')
+warnings.filterwarnings('ignore', message='.*Redirects are currently not supported.*')
+warnings.filterwarnings('ignore', message='.*No exporters were provided.*')
+warnings.filterwarnings('ignore', message='.*OneLogger.*')
+
+# Suppress NeMo logging warnings
+logging.getLogger('nemo').setLevel(logging.ERROR)
+logging.getLogger('nemo_logging').setLevel(logging.ERROR)
 
 from dotenv import load_dotenv
 
 load_dotenv(os.path.join("..", ".env"), override=True)
 
+# Configure LangSmith (optional - only if LANGSMITH_API_KEY is set in .env)
+if os.getenv("LANGSMITH_API_KEY"):
+    os.environ["LANGSMITH_TRACING"] = os.getenv("LANGSMITH_TRACING", "true")
+    os.environ["LANGSMITH_PROJECT"] = os.getenv("LANGSMITH_PROJECT", "default")
+
 import sys
 import io
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
-# from langchain.agents import create_react_agent
 
 # Fix console encoding for Windows to support emoji characters
 if sys.platform == "win32":
@@ -19,14 +37,21 @@ from langchain.chat_models import init_chat_model
 from tools.audio_chopper_tool import chop_audio_by_rttm
 from tools.diarize_tool import diarize_audio
 from tools.stt_tool import transcribe_audio_segments
-from tools.metadata_tool import extract_metadata_from_filename
+from tools.metadata_tool import identify_speakers_from_filename
 from tools.cantonese_corrector_tool import correct_transcriptions
 from tools.stock_identifier_tool import identify_stocks_in_conversation
+from tools.stock_verifier_tool import verify_stocks
+from tools.stock_review_tool import generate_transaction_report
 
+# Configure dspy once at module level to avoid threading issues
+import dspy
+lm = dspy.LM("ollama_chat/qwen3:32b", api_base="http://localhost:11434", api_key="", temperature=0.0)
+dspy.configure(lm=lm)
 
 model = ChatOpenAI(
     api_key="ollama",  # Not used, but required by ChatOpenAI
-    model="qwen3:8b",
+    # model="qwen3:14b",
+    model="qwen3:30b-instruct",
     # base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
     base_url="http://localhost:11434/v1",
     temperature=0.0
@@ -34,24 +59,19 @@ model = ChatOpenAI(
 
 # Augment the LLM with tools
 tools = [
-    extract_metadata_from_filename,
+    identify_speakers_from_filename,
     diarize_audio,
     chop_audio_by_rttm,
     transcribe_audio_segments,
     correct_transcriptions,
-    identify_stocks_in_conversation
+    identify_stocks_in_conversation,
+    verify_stocks,
+    generate_transaction_report
 ]
-# tools_by_name = {tool.name: tool for tool in tools}
-# model_with_tools = model.bind_tools(tools)
 
 from langchain.messages import AnyMessage
 from typing_extensions import TypedDict, Annotated
 import operator
-
-
-# class MessagesState(TypedDict):
-#     messages: Annotated[list[AnyMessage], operator.add]
-#     llm_calls: int
 
 from langchain.messages import SystemMessage, ToolMessage
 import json
@@ -78,6 +98,9 @@ def get_audio_files_from_directory(directory, audio_extensions=('.wav', '.mp3', 
     Returns:
         List of absolute paths to audio files, sorted alphabetically
     """
+    trace_start = time.time()
+    print(f"[TRACE {time.strftime('%H:%M:%S')}] Starting directory scan: {directory}")
+    
     audio_files = []
     
     if not os.path.exists(directory):
@@ -91,6 +114,9 @@ def get_audio_files_from_directory(directory, audio_extensions=('.wav', '.mp3', 
     
     # Sort files for consistent processing order
     audio_files.sort()
+    
+    trace_elapsed = time.time() - trace_start
+    print(f"[TRACE {time.strftime('%H:%M:%S')}] Directory scan completed in {trace_elapsed:.2f}s - Found {len(audio_files)} files")
     return audio_files
 
 # Define the directory to scan for audio files
@@ -116,52 +142,33 @@ for idx, audio_file in enumerate(audio_files, 1):
     relative_path = os.path.relpath(audio_file, audio_directory)
     print(f"   {idx}. {relative_path}")
 
-# messages = [HumanMessage(content=f"First extract metadata from the audio file '{audio_file_for_llm}', then diarize it with 2 speakers, then chop it into speaker segments with 50ms padding, transcribe all the segments to text using SenseVoiceSmall, and finally apply Cantonese text corrections to the transcriptions.")]
-# result = agent.invoke(
-#     {"messages": messages},
-#     config={"recursion_limit": 50}  # Increase from default 25 to handle complex workflows
-# )
-# for m in result["messages"]:
-#     m.pretty_print()
+SYSTEM_PROMPT = """You are a helpful assistant that processes phone conversation audio files to generate comprehensive transaction reports.
 
-# print("\n" + "="*80)
-# print("Workflow completed!")
-# print("="*80)
+YOUR GOAL: Analyze phone conversations between brokers and clients to generate a detailed report of stock transactions discussed.
 
-SYSTEM_PROMPT = """You are a helpful assistant with access to audio processing tools. For audio analysis workflows:
+To achieve this goal, you MUST execute ALL tools in this EXACT order:
 
-1. Use extract_metadata_from_filename tool to extract metadata from audio filenames (broker name, client info, timestamps, etc.)
+1. identify_speakers_from_filename - Extract metadata (broker, client, datetime) from filename
+2. diarize_audio - Identify who speaks when (speaker diarization)
+3. chop_audio_by_rttm - Split audio into individual speaker segments
+4. transcribe_audio_segments - Convert speech to text for each segment
+5. correct_transcriptions - Apply Cantonese language corrections
+6. identify_stocks_in_conversation - Extract stock mentions and transaction details
+7. verify_stocks - Verify stock codes and names against database
+8. generate_transaction_report - FINAL STEP: Generate the comprehensive transaction report
 
-2. Use diarize_audio tool to identify speakers and when they spoke. 
-   - Pass only: audio_filepath, num_speakers, domain_type
-   - Returns: dict with 'audio_filepath' and 'rttm_filepath' fields
+CRITICAL RULES:
+- Execute EVERY tool in the pipeline in the order listed above
+- Complete each tool fully before moving to the next tool
+- Do NOT skip any tools, especially the final generate_transaction_report tool
+- Do NOT stop until the transaction report has been generated
+- Each tool will tell you to "Continue with the next step in the pipeline" - you MUST continue
+- Pass the outputs from previous tools as inputs to subsequent tools as needed
+- For generate_transaction_report, you need BOTH the corrected transcription file AND the verified stocks JSON file
 
-3. Use chop_audio_by_rttm tool to split the audio into speaker segments.
-   - Pass only: audio_filepath and rttm_filepath (from step 2)
-   - Do NOT pass output_dir - it's automatically determined
-   - Returns: string path to the directory containing chopped segments
+IMPORTANT: The pipeline is NOT complete until generate_transaction_report has been executed and the final report is generated.
 
-4. Use transcribe_audio_segments tool to transcribe the chopped audio segments.
-   - Pass the segments_directory path returned from step 3
-   - Returns: string path to the transcription output file
-
-IMPORTANT: 
-- Never specify output directories manually. All tools automatically organize outputs into agent/output/ subdirectories.
-- The overwrite behavior for diarize_audio, chop_audio_by_rttm, and transcribe_audio_segments is controlled by settings file (agent/settings.py).
 """
-
-
-# SYSTEM_PROMPT = """You are a helpful assistant with access to audio processing tools. For audio analysis workflows:
-# 1. Use extract_metadata_from_filename tool to extract metadata from audio filenames (broker name, client info, timestamps, etc.)
-# 2. Use diarize_audio tool to identify speakers and when they spoke. It returns a JSON response with 'audio_filepath' and 'rttm_content' fields.
-# 3. Use chop_audio_by_rttm tool with the 'audio_filepath' and 'rttm_content' values from the diarize_audio response to split the audio into speaker segments. The response will contain an 'output_dir' field.
-# 4. Use transcribe_audio_segments tool with the 'output_dir' value from chop_audio_by_rttm to transcribe the chopped audio segments using SenseVoiceSmall.
-# 5. Use correct_transcriptions tool to apply Cantonese text corrections to the transcriptions.
-# 6. Use identify_stocks_in_conversation tool to analyze conversation text and identify stocks that were discussed, including stock names, symbols, quantities, and prices mentioned.
-
-# IMPORTANT: Each tool returns a JSON response. You must extract the specific fields from each response and pass them as arguments to the next tool. For example:
-# - After diarize_audio returns {"success": true, "audio_filepath": "...", "rttm_content": "...", ...}, extract the audio_filepath and rttm_content values and pass them to chop_audio_by_rttm.
-# - After chop_audio_by_rttm returns {"success": true, "output_dir": "...", ...}, extract the output_dir value and pass it to transcribe_audio_segments."""
 
 # Create agent
 agent = create_react_agent(
@@ -169,7 +176,7 @@ agent = create_react_agent(
     tools,
     prompt=SYSTEM_PROMPT,
     #state_schema=AgentState,  # default
-).with_config({"recursion_limit": 20})  #recursion_limit limits the number of steps the agent will run
+).with_config({"recursion_limit": 30})  #recursion_limit limits the number of steps the agent will run (increased to 30 to accommodate 8-step pipeline)
 
 # Process each audio file one by one
 corrected_transcription_files = []
@@ -183,32 +190,48 @@ for idx, audio_file in enumerate(audio_files, 1):
     audio_file_for_llm = audio_file.replace('\\', '/')
     
     # Process this audio file through the pipeline
+    trace_start = time.time()
+    print(f"[TRACE {time.strftime('%H:%M:%S')}] Starting agent.invoke() for file: {os.path.basename(audio_file)}")
+    
     result = agent.invoke(
         {
             "messages": [
                 {
                     "role": "user",
-                    # "content": f"""
-                    # First extract metadata from the audio file '{audio_file_for_llm}',
-                    # then diarize it with 2 speakers,
-                    # then chop it into speaker segments with 0ms padding,
-                    # transcribe all the segments to text using SenseVoiceSmall,
-                    # and finally apply Cantonese text corrections to the transcriptions.""",
-                    
                     "content": f"""
-                    First extract metadata from the audio file '{audio_file_for_llm}',
-                    then diarize it with 2 speakers,
-                    then chop it into speaker segments with 0ms padding,
-                    transcribe all the segments to text using SenseVoiceSmall""",
+Analyze the phone conversation in '{audio_file_for_llm}' and generate a comprehensive transaction report.
+
+Execute ALL tools in sequence to achieve this goal:
+1. identify_speakers_from_filename (extract metadata from the audio file)
+2. diarize_audio (identify speakers, use 2 speakers)
+3. chop_audio_by_rttm (split into speaker segments)
+4. transcribe_audio_segments (convert speech to text)
+5. correct_transcriptions (apply Cantonese corrections)
+6. identify_stocks_in_conversation (extract stock transactions)
+7. verify_stocks (verify against database)
+8. generate_transaction_report (FINAL - create the comprehensive report)
+
+IMPORTANT: Do not stop until generate_transaction_report has been executed and the final transaction report is generated.
+Each tool will provide outputs needed by subsequent tools - pass these along as you proceed.
+""",
                 }
             ],
         }
     )
     
+    trace_elapsed = time.time() - trace_start
+    print(f"[TRACE {time.strftime('%H:%M:%S')}] agent.invoke() completed in {trace_elapsed:.2f}s ({trace_elapsed/60:.2f} minutes)")
+    
     # Extract the path to the corrected transcription file from the agent's response
     # The correct_transcriptions tool saves to transcriptions_text_corrected.txt
+    trace_start = time.time()
+    print(f"[TRACE {time.strftime('%H:%M:%S')}] Checking for output files...")
+    
     output_dir = os.path.join(current_dir, "output", "transcriptions", os.path.splitext(os.path.basename(audio_file))[0])
     corrected_file = os.path.join(output_dir, "transcriptions_text_corrected.txt")
+    
+    trace_elapsed = time.time() - trace_start
+    print(f"[TRACE {time.strftime('%H:%M:%S')}] File check completed in {trace_elapsed:.4f}s")
     
     if os.path.exists(corrected_file):
         corrected_transcription_files.append(corrected_file)

@@ -1,0 +1,11 @@
+{
+  "source_file": "test_transcription_test_missing_fields.txt",
+  "audio_filename": "test_audio_test_missing_fields",
+  "timestamp": "2025-01-20 10:00:00",
+  "stocks": [
+    {
+      "stock_name": "騰訊控股",
+      "stock_number": "00700"
+    }
+  ]
+}
