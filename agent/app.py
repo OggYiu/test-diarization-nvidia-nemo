@@ -32,10 +32,8 @@ from langchain.chat_models import init_chat_model
 from tools.audio_chopper_tool import chop_audio_by_rttm
 from tools.diarize_tool import diarize_audio
 from tools.stt_tool import transcribe_audio_segments
-from tools.metadata_tool import identify_speakers_from_filename
 from tools.cantonese_corrector_tool import correct_transcriptions
 from tools.stock_identifier_tool import identify_stocks_in_conversation
-from tools.stock_verifier_tool import verify_stocks
 from tools.stock_review_tool import generate_transaction_report
 
 # Configure dspy once at module level to avoid threading issues
@@ -54,13 +52,11 @@ model = ChatOpenAI(
 
 # Augment the LLM with tools
 tools = [
-    identify_speakers_from_filename,
     diarize_audio,
     chop_audio_by_rttm,
     transcribe_audio_segments,
     correct_transcriptions,
     identify_stocks_in_conversation,
-    verify_stocks,
     generate_transaction_report
 ]
 
@@ -143,14 +139,12 @@ YOUR GOAL: Analyze phone conversations between brokers and clients to generate a
 
 To achieve this goal, you MUST execute ALL tools in this EXACT order:
 
-1. identify_speakers_from_filename - Extract metadata (broker, client, datetime) from filename
-2. diarize_audio - Identify who speaks when (speaker diarization)
-3. chop_audio_by_rttm - Split audio into individual speaker segments
-4. transcribe_audio_segments - Convert speech to text for each segment
-5. correct_transcriptions - Apply Cantonese language corrections
-6. identify_stocks_in_conversation - Extract stock mentions and transaction details
-7. verify_stocks - Verify stock codes and names against database
-8. generate_transaction_report - FINAL STEP: Generate the comprehensive transaction report
+1. diarize_audio - Identify who speaks when (speaker diarization)
+2. chop_audio_by_rttm - Split audio into individual speaker segments
+3. transcribe_audio_segments - Convert speech to text for each segment
+4. correct_transcriptions - Apply Cantonese language corrections
+5. identify_stocks_in_conversation - Extract stock mentions, transaction details, AND verify against database (this tool now does both identification and verification in one step)
+6. generate_transaction_report - FINAL STEP: Generate the comprehensive transaction report
 
 CRITICAL RULES:
 - Execute EVERY tool in the pipeline in the order listed above
@@ -197,14 +191,12 @@ for idx, audio_file in enumerate(audio_files, 1):
 Analyze the phone conversation in '{audio_file_for_llm}' and generate a comprehensive transaction report.
 
 Execute ALL tools in sequence to achieve this goal:
-1. identify_speakers_from_filename (extract metadata from the audio file)
-2. diarize_audio (identify speakers, use 2 speakers)
-3. chop_audio_by_rttm (split into speaker segments)
-4. transcribe_audio_segments (convert speech to text)
-5. correct_transcriptions (apply Cantonese corrections)
-6. identify_stocks_in_conversation (extract stock transactions)
-7. verify_stocks (verify against database)
-8. generate_transaction_report (FINAL - create the comprehensive report)
+1. diarize_audio (identify speakers, use 2 speakers)
+2. chop_audio_by_rttm (split into speaker segments)
+3. transcribe_audio_segments (convert speech to text)
+4. correct_transcriptions (apply Cantonese corrections)
+5. identify_stocks_in_conversation (extract stock transactions AND verify against database - this tool now does both)
+6. generate_transaction_report (FINAL - create the comprehensive report)
 
 IMPORTANT: Do not stop until generate_transaction_report has been executed and the final transaction report is generated.
 Each tool will provide outputs needed by subsequent tools - pass these along as you proceed.

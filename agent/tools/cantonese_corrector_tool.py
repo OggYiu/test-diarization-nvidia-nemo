@@ -13,7 +13,6 @@ from pathlib import Path
 
 # Add parent directory to path to import CantoneseCorrector
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-from agent.cantonese_corrector import CantoneseCorrector
 
 # Import path normalization utilities
 from .path_utils import normalize_path_for_llm, normalize_path_from_llm
