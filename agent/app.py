@@ -16,12 +16,7 @@ logging.getLogger('nemo_logging').setLevel(logging.ERROR)
 
 from dotenv import load_dotenv
 
-load_dotenv(os.path.join("..", ".env"), override=True)
-
-# Configure LangSmith (optional - only if LANGSMITH_API_KEY is set in .env)
-if os.getenv("LANGSMITH_API_KEY"):
-    os.environ["LANGSMITH_TRACING"] = os.getenv("LANGSMITH_TRACING", "true")
-    os.environ["LANGSMITH_PROJECT"] = os.getenv("LANGSMITH_PROJECT", "default")
+load_dotenv(os.path.join(".", ".env"), override=True)
 
 import sys
 import io
