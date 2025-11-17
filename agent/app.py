@@ -45,15 +45,15 @@ from tools.stock_review_tool import generate_transaction_report
 
 # Configure dspy once at module level to avoid threading issues
 import dspy
-lm = dspy.LM("ollama_chat/qwen3:32b", api_base="http://localhost:11434", api_key="", temperature=0.0)
+lm = dspy.LM("ollama_chat/qwen3:32b", api_base="http://localhost:11434", api_key=os.getenv("DSPY_API_KEY", ""), temperature=0.0)
 dspy.configure(lm=lm)
 
 model = ChatOpenAI(
-    api_key="ollama",  # Not used, but required by ChatOpenAI
+    api_key=os.getenv("LANGCHAIN_API_KEY", "ollama"),  # Not used, but required by ChatOpenAI
     # model="qwen3:14b",
     model="qwen3:30b-instruct",
     # base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
-    base_url="http://localhost:11434/v1",
+    base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
     temperature=0.0
 )
 
